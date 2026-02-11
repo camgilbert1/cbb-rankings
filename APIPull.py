@@ -186,10 +186,14 @@ def upload_to_databricks(df, table_name, year):
         cursor.execute(f"DROP TABLE IF EXISTS {full_table_name}")
         print(f"✓ Dropped existing table {full_table_name}")
 
+        # Clean column names (replace invalid characters for Delta tables)
+        df_clean = df.copy()
+        df_clean.columns = [col.replace('-', '_').replace('.', '_').replace(' ', '_') for col in df_clean.columns]
+
         # Build column definitions from dataframe
         columns = []
-        for col in df.columns:
-            dtype = df[col].dtype
+        for col in df_clean.columns:
+            dtype = df_clean[col].dtype
             if dtype == 'object':
                 sql_type = 'STRING'
             elif dtype == 'int64':
@@ -211,10 +215,10 @@ def upload_to_databricks(df, table_name, year):
 
         # Insert data in batches
         batch_size = 100
-        total_rows = len(df)
+        total_rows = len(df_clean)
 
         for i in range(0, total_rows, batch_size):
-            batch = df.iloc[i:i+batch_size]
+            batch = df_clean.iloc[i:i+batch_size]
 
             # Build VALUES clause
             values_list = []
