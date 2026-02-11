@@ -62,9 +62,18 @@ jobs:
           dbt deps
           dbt run
 
+      - name: Generate game predictions
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_HTTP_PATH: ${{ secrets.DATABRICKS_HTTP_PATH }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+        run: |
+          python GamePredictions.py
+
       - name: Summary
         run: |
           echo "✅ Data pipeline completed successfully!"
           echo "📊 KenPom data refreshed"
           echo "🔄 dbt transformations applied"
+          echo "🎯 Game predictions generated"
           echo "🌐 Dashboard will show updated data"

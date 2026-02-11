@@ -8,6 +8,10 @@ import requests
 from databricks import sql
 import os
 from datetime import datetime
+from dotenv import load_dotenv
+
+# Load environment variables from .env file for local development
+load_dotenv()
 
 # =============================================================================
 # CONFIGURATION
@@ -108,6 +112,65 @@ def get_team_stats_from_databricks():
 # PREDICTION ENGINE
 # =============================================================================
 
+def find_team_match(espn_name, team_stats):
+    """
+    Match ESPN team name to KenPom team name
+
+    Args:
+        espn_name (str): Full team name from ESPN (e.g., "Michigan Wolverines")
+        team_stats (pd.DataFrame): Team statistics with KenPom names
+
+    Returns:
+        str: Matched team name or None
+    """
+    # Common abbreviation mappings
+    name_mappings = {
+        'UConn': 'Connecticut',
+        'UNLV': 'Nevada-Las Vegas',
+        'USC': 'Southern California',
+        'SMU': 'Southern Methodist',
+        'TCU': 'Texas Christian',
+        'BYU': 'Brigham Young',
+        'UCF': 'Central Florida',
+        'VCU': 'Virginia Commonwealth',
+        'LSU': 'Louisiana State',
+        'UTEP': 'Texas-El Paso',
+        'UTSA': 'Texas-San Antonio',
+        'UAB': 'Alabama-Birmingham',
+    }
+
+    # First try exact match
+    if espn_name in team_stats['team_name'].values:
+        return espn_name
+
+    # Try mapping common abbreviations
+    first_word = espn_name.split()[0]
+    search_term = first_word  # Default search term
+
+    if first_word in name_mappings:
+        search_term = name_mappings[first_word]
+
+    # Try matching the search term (either original or mapped)
+    matches = team_stats[team_stats['team_name'].str.contains(search_term, case=False, na=False)]
+
+    if len(matches) == 1:
+        return matches.iloc[0]['team_name']
+    elif len(matches) > 1:
+        # If multiple matches, try exact word boundary match
+        for team_name in matches['team_name']:
+            if search_term.lower() in team_name.lower().split():
+                return team_name
+        # If no exact word match, return first match
+        return matches.iloc[0]['team_name']
+
+    # Try checking if KenPom name is contained in ESPN name (as fallback)
+    for team_name in team_stats['team_name']:
+        if team_name.lower() in espn_name.lower():
+            return team_name
+
+    return None
+
+
 def calculate_matchup_features(home_team, away_team, team_stats):
     """
     Calculate prediction features for a matchup
@@ -120,9 +183,17 @@ def calculate_matchup_features(home_team, away_team, team_stats):
     Returns:
         dict: Calculated features
     """
+    # Match ESPN team names to KenPom team names
+    home_match = find_team_match(home_team, team_stats)
+    away_match = find_team_match(away_team, team_stats)
+
+    if not home_match or not away_match:
+        print(f"  ⚠️  Could not find stats for {home_team if not home_match else away_team}")
+        return None
+
     # Find team stats
-    home_stats = team_stats[team_stats['team_name'] == home_team]
-    away_stats = team_stats[team_stats['team_name'] == away_team]
+    home_stats = team_stats[team_stats['team_name'] == home_match]
+    away_stats = team_stats[team_stats['team_name'] == away_match]
 
     if home_stats.empty or away_stats.empty:
         return None

@@ -59,9 +59,45 @@ def load_data():
         st.error(f"Error loading data: {e}")
         return None
 
+
+@st.cache_data(ttl=600)  # Cache for 10 minutes
+def load_predictions():
+    """Load today's game predictions from Databricks"""
+    try:
+        connection = sql.connect(
+            server_hostname=st.secrets.get("DATABRICKS_HOST", os.getenv("DATABRICKS_HOST")),
+            http_path=st.secrets.get("DATABRICKS_HTTP_PATH", os.getenv("DATABRICKS_HTTP_PATH")),
+            access_token=st.secrets.get("DATABRICKS_TOKEN", os.getenv("DATABRICKS_TOKEN"))
+        )
+
+        cursor = connection.cursor()
+        cursor.execute("""
+            SELECT
+                game_time,
+                home_team,
+                away_team,
+                predicted_winner,
+                win_probability,
+                predicted_home_score,
+                predicted_away_score,
+                confidence
+            FROM workspace.default.game_predictions
+            ORDER BY game_time
+        """)
+
+        df = cursor.fetchall_arrow().to_pandas()
+        cursor.close()
+        connection.close()
+
+        return df
+    except Exception as e:
+        # Return empty dataframe if no predictions exist yet
+        return pd.DataFrame()
+
 # Load data
 with st.spinner("Loading rankings..."):
     df = load_data()
+    predictions_df = load_predictions()
 
 if df is not None:
     # Show last updated time
@@ -122,8 +158,34 @@ if df is not None:
 
     st.markdown("---")
 
+    # Game Predictions Section
+    if not predictions_df.empty:
+        st.subheader("🎯 Today's Game Predictions")
+
+        for _, game in predictions_df.iterrows():
+            col1, col2, col3 = st.columns([2, 1, 2])
+
+            with col1:
+                st.markdown(f"**{game['away_team']}**")
+                st.caption(f"Predicted: {game['predicted_away_score']}")
+
+            with col2:
+                st.markdown("**@**")
+                confidence_color = {"High": "🟢", "Medium": "🟡", "Low": "🔴"}
+                st.caption(f"{confidence_color.get(game['confidence'], '⚪')} {game['confidence']}")
+
+            with col3:
+                st.markdown(f"**{game['home_team']}**")
+                st.caption(f"Predicted: {game['predicted_home_score']}")
+
+            # Winner and probability
+            winner_emoji = "🏆" if game['predicted_winner'] == game['home_team'] else "🏆  "
+            st.info(f"{winner_emoji} **{game['predicted_winner']}** ({game['win_probability']:.0%})")
+
+            st.markdown("---")
+
     # Main rankings table
-    st.subheader("Rankings")
+    st.subheader("📊 Team Rankings")
 
     # Format the dataframe for display
     display_df = filtered_df.copy()
