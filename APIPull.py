@@ -186,21 +186,6 @@ def upload_to_databricks(df, table_name, year):
         cursor.execute(f"DROP TABLE IF EXISTS {full_table_name}")
         print(f"✓ Dropped existing table {full_table_name}")
 
-        # Create table from dataframe
-        # Convert dataframe to SQL-friendly format
-        cursor.execute(f"""
-            CREATE TABLE {full_table_name}
-            USING DELTA
-            AS SELECT * FROM VALUES
-        """)
-
-        # Close cursor for table creation
-        cursor.close()
-
-        # Use pandas to_sql equivalent with databricks
-        # For now, we'll insert via SQL commands
-        cursor = connection.cursor()
-
         # Build column definitions from dataframe
         columns = []
         for col in df.columns:
