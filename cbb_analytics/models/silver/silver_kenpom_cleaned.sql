@@ -18,21 +18,21 @@ SELECT
     Conference as conference,
 
     -- Overall Metrics (calculate efficiency margin)
-    (`Off. Efficiency-Adj` - `Def. Efficiency-Adj`) as adj_efficiency_margin,
-    `Off. Efficiency-Adj` as adj_offensive_efficiency,
-    `Def. Efficiency-Adj` as adj_defensive_efficiency,
+    (Off__Efficiency_Adj - Def__Efficiency_Adj) as adj_efficiency_margin,
+    Off__Efficiency_Adj as adj_offensive_efficiency,
+    Def__Efficiency_Adj as adj_defensive_efficiency,
 
     -- Tempo
-    `Tempo-Adj` as adj_tempo,
+    Tempo_Adj as adj_tempo,
 
-    -- Rankings (use offensive rank as proxy for overall rank since we don't have Rk)
-    ROW_NUMBER() OVER (ORDER BY (`Off. Efficiency-Adj` - `Def. Efficiency-Adj`) DESC) as overall_rank,
+    -- Rankings (calculate overall rank from efficiency margin)
+    ROW_NUMBER() OVER (ORDER BY (Off__Efficiency_Adj - Def__Efficiency_Adj) DESC) as overall_rank,
 
     -- Offensive Rankings
-    `Off. Efficiency-Adj.Rank` as offensive_rank,
+    Off__Efficiency_Adj_Rank as offensive_rank,
 
     -- Defensive Rankings
-    `Def. Efficiency-Adj.Rank` as defensive_rank,
+    Def__Efficiency_Adj_Rank as defensive_rank,
 
     -- Metadata
     current_timestamp() as loaded_at
