@@ -11,6 +11,8 @@ import requests
 import kenpompy as kenpompy
 from kenpompy.utils import login
 from kenpompy.summary import get_efficiency
+from databricks import sql
+import os
 
 # =============================================================================
 # CONFIGURATION - Add your KenPom credentials here
@@ -148,6 +150,124 @@ def fetch_haslametrics_ratings():
         return None
 
 
+def upload_to_databricks(df, table_name, year):
+    """
+    Upload dataframe to Databricks, replacing existing table
+
+    Args:
+        df (pd.DataFrame): Data to upload
+        table_name (str): Name of the table (e.g., 'kenpom_ratings')
+        year (int): Season year for table naming
+    """
+    # Get Databricks credentials from environment variables
+    host = os.getenv("DATABRICKS_HOST")
+    http_path = os.getenv("DATABRICKS_HTTP_PATH")
+    token = os.getenv("DATABRICKS_TOKEN")
+
+    if not all([host, http_path, token]):
+        print("⚠️  Databricks credentials not found in environment variables.")
+        print("   Skipping upload to Databricks. CSV file saved locally.")
+        return
+
+    print(f"\nUploading {table_name}_{year} to Databricks...")
+
+    try:
+        # Connect to Databricks
+        connection = sql.connect(
+            server_hostname=host,
+            http_path=http_path,
+            access_token=token
+        )
+
+        cursor = connection.cursor()
+
+        # Drop existing table
+        full_table_name = f"workspace.default.{table_name}_{year}"
+        cursor.execute(f"DROP TABLE IF EXISTS {full_table_name}")
+        print(f"✓ Dropped existing table {full_table_name}")
+
+        # Create table from dataframe
+        # Convert dataframe to SQL-friendly format
+        cursor.execute(f"""
+            CREATE TABLE {full_table_name}
+            USING DELTA
+            AS SELECT * FROM VALUES
+        """)
+
+        # Close cursor for table creation
+        cursor.close()
+
+        # Use pandas to_sql equivalent with databricks
+        # For now, we'll insert via SQL commands
+        cursor = connection.cursor()
+
+        # Build column definitions from dataframe
+        columns = []
+        for col in df.columns:
+            dtype = df[col].dtype
+            if dtype == 'object':
+                sql_type = 'STRING'
+            elif dtype == 'int64':
+                sql_type = 'BIGINT'
+            elif dtype == 'float64':
+                sql_type = 'DOUBLE'
+            else:
+                sql_type = 'STRING'
+            columns.append(f"`{col}` {sql_type}")
+
+        # Create empty table with proper schema
+        cursor.execute(f"DROP TABLE IF EXISTS {full_table_name}")
+        cursor.execute(f"""
+            CREATE TABLE {full_table_name} (
+                {', '.join(columns)}
+            )
+            USING DELTA
+        """)
+
+        # Insert data in batches
+        batch_size = 100
+        total_rows = len(df)
+
+        for i in range(0, total_rows, batch_size):
+            batch = df.iloc[i:i+batch_size]
+
+            # Build VALUES clause
+            values_list = []
+            for _, row in batch.iterrows():
+                value_parts = []
+                for val in row:
+                    if pd.isna(val):
+                        value_parts.append('NULL')
+                    elif isinstance(val, str):
+                        # Escape single quotes
+                        escaped_val = val.replace("'", "''")
+                        value_parts.append(f"'{escaped_val}'")
+                    else:
+                        value_parts.append(str(val))
+                values_list.append(f"({', '.join(value_parts)})")
+
+            values_clause = ', '.join(values_list)
+
+            insert_sql = f"""
+                INSERT INTO {full_table_name}
+                VALUES {values_clause}
+            """
+
+            cursor.execute(insert_sql)
+
+            if (i + batch_size) % 500 == 0:
+                print(f"  Inserted {min(i + batch_size, total_rows)}/{total_rows} rows...")
+
+        print(f"✓ Successfully uploaded {total_rows} rows to {full_table_name}")
+
+        cursor.close()
+        connection.close()
+
+    except Exception as e:
+        print(f"❌ Error uploading to Databricks: {e}")
+        print(f"   CSV file saved locally as backup.")
+
+
 def main():
     """Main execution function"""
 
@@ -218,6 +338,9 @@ def main():
     kenpom_file = "kenpom_ratings_2026.csv"
     kenpom_data.to_csv(kenpom_file, index=False)
     print(f"\n✓ KenPom data saved to: {kenpom_file}")
+
+    # Upload to Databricks
+    upload_to_databricks(kenpom_data, "kenpom_ratings", 2026)
 
     # Save Haslametrics
     if hasla_data is not None:
