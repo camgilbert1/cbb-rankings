@@ -42,7 +42,8 @@ def load_data():
                 adj_defensive_efficiency,
                 offensive_rank,
                 defensive_rank,
-                adj_tempo
+                adj_tempo,
+                loaded_at
             FROM workspace.default_gold.gold_team_rankings
             ORDER BY overall_rank
         """)
@@ -61,6 +62,11 @@ with st.spinner("Loading rankings..."):
     df = load_data()
 
 if df is not None:
+    # Show last updated time
+    if 'loaded_at' in df.columns and len(df) > 0:
+        last_updated = df['loaded_at'].iloc[0]
+        st.caption(f"📅 Last updated: {last_updated.strftime('%B %d, %Y at %I:%M %p ET')}")
+
     # Sidebar filters
     st.sidebar.header("Filters")
 
@@ -114,6 +120,10 @@ if df is not None:
 
     # Format the dataframe for display
     display_df = filtered_df.copy()
+    # Drop loaded_at column before display
+    if 'loaded_at' in display_df.columns:
+        display_df = display_df.drop('loaded_at', axis=1)
+
     display_df.columns = [
         "Rank", "Team", "Conference", "Eff. Margin",
         "Off. Eff.", "Def. Eff.", "Off. Rank", "Def. Rank", "Tempo"
