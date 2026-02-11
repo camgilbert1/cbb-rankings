@@ -19,11 +19,66 @@ load_dotenv()
 DATABRICKS_HOST = os.getenv("DATABRICKS_HOST")
 DATABRICKS_HTTP_PATH = os.getenv("DATABRICKS_HTTP_PATH")
 DATABRICKS_TOKEN = os.getenv("DATABRICKS_TOKEN")
+ODDS_API_KEY = os.getenv("ODDS_API_KEY")
 
 
 # =============================================================================
 # DATA FETCHING
 # =============================================================================
+
+def get_vegas_spreads():
+    """
+    Fetch Vegas spreads from The Odds API
+
+    Returns:
+        dict: Team name to spread mapping
+    """
+    if not ODDS_API_KEY:
+        print("⚠️  No Odds API key found, spreads will not be available")
+        return {}
+
+    try:
+        url = "https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds/"
+        params = {
+            'apiKey': ODDS_API_KEY,
+            'regions': 'us',
+            'markets': 'spreads',
+            'oddsFormat': 'american'
+        }
+
+        response = requests.get(url, params=params)
+        response.raise_for_status()
+
+        data = response.json()
+
+        # Build mapping of team names to spreads
+        spreads = {}
+        for game in data:
+            home_team = game['home_team']
+            away_team = game['away_team']
+
+            # Get the first bookmaker's spread (usually consensus)
+            if game.get('bookmakers') and len(game['bookmakers']) > 0:
+                bookmaker = game['bookmakers'][0]
+                markets = bookmaker.get('markets', [])
+
+                for market in markets:
+                    if market['key'] == 'spreads':
+                        outcomes = market['outcomes']
+                        for outcome in outcomes:
+                            team = outcome['name']
+                            spread = outcome['point']
+
+                            # Store spread (negative means favorite)
+                            spreads[team] = spread
+
+        print(f"✓ Fetched spreads for {len(spreads) // 2} games")
+        return spreads
+
+    except Exception as e:
+        print(f"⚠️  Error fetching spreads: {e}")
+        return {}
+
 
 def get_todays_games():
     """
@@ -325,6 +380,7 @@ def upload_predictions_to_databricks(predictions_df):
                 predicted_home_score DOUBLE,
                 predicted_away_score DOUBLE,
                 confidence STRING,
+                vegas_spread DOUBLE,
                 prediction_date TIMESTAMP
             )
             USING DELTA
@@ -342,6 +398,7 @@ def upload_predictions_to_databricks(predictions_df):
                     {row['predicted_home_score']},
                     {row['predicted_away_score']},
                     '{row['confidence']}',
+                    {row['vegas_spread']},
                     current_timestamp()
                 )
             """)
@@ -374,6 +431,9 @@ def main():
         print("\nNo games scheduled for today.")
         return
 
+    # Get Vegas spreads
+    vegas_spreads = get_vegas_spreads()
+
     # Get team statistics
     team_stats = get_team_stats_from_databricks()
 
@@ -395,6 +455,10 @@ def main():
         print(f"\n{home_team} vs {away_team}")
         print("-" * 60)
 
+        # Get Vegas spread
+        home_spread = vegas_spreads.get(home_team)
+        away_spread = vegas_spreads.get(away_team)
+
         # Calculate features
         features = calculate_matchup_features(home_team, away_team, team_stats)
 
@@ -404,6 +468,9 @@ def main():
         # Display prediction
         print(f"Predicted Winner: {prediction['predicted_winner']} ({prediction['win_probability']:.0%} confidence)")
         print(f"Predicted Score: {home_team} {prediction['predicted_home_score']}, {away_team} {prediction['predicted_away_score']}")
+        if home_spread is not None:
+            spread_text = f"{home_team} {home_spread:+.1f}" if home_spread < 0 else f"{away_team} {away_spread:+.1f}"
+            print(f"Vegas Spread: {spread_text}")
         print(f"Confidence Level: {prediction['confidence']}")
         print(f"\nKey Factors:")
         for factor in prediction['key_factors']:
@@ -418,7 +485,8 @@ def main():
             'win_probability': prediction['win_probability'],
             'predicted_home_score': prediction['predicted_home_score'],
             'predicted_away_score': prediction['predicted_away_score'],
-            'confidence': prediction['confidence']
+            'confidence': prediction['confidence'],
+            'vegas_spread': home_spread if home_spread is not None else 0.0
         })
 
     # Convert to DataFrame

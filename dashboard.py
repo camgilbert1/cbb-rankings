@@ -80,7 +80,8 @@ def load_predictions():
                 win_probability,
                 predicted_home_score,
                 predicted_away_score,
-                confidence
+                confidence,
+                vegas_spread
             FROM workspace.default.game_predictions
             ORDER BY game_time
         """)
@@ -203,6 +204,12 @@ if df is not None:
             lambda x: f"{x:.0%}"
         )
 
+        # Format Vegas spread
+        display_predictions['Spread'] = display_predictions.apply(
+            lambda row: f"{row['home_team'].split()[-1][:3]} {row['vegas_spread']:+.1f}" if row['vegas_spread'] != 0 else "N/A",
+            axis=1
+        )
+
         # Add confidence emoji
         confidence_emoji = {"High": "🟢", "Medium": "🟡", "Low": "🔴"}
         display_predictions['Conf.'] = display_predictions['confidence'].apply(
@@ -210,7 +217,7 @@ if df is not None:
         )
 
         # Select and display columns
-        compact_df = display_predictions[['Matchup', 'Score', 'Prediction', 'Win %', 'Conf.']]
+        compact_df = display_predictions[['Matchup', 'Score', 'Spread', 'Prediction', 'Win %', 'Conf.']]
 
         st.dataframe(
             compact_df,
