@@ -111,7 +111,25 @@ if df is not None:
         st.caption(f"📅 Last updated: {last_updated_et.strftime('%B %d, %Y at %I:%M %p ET')}")
 
     # Sidebar filters
-    st.sidebar.header("Filters")
+    st.sidebar.header("⚙️ Settings")
+
+    # Dark mode toggle
+    dark_mode = st.sidebar.toggle("🌙 Dark Mode", value=False)
+
+    if dark_mode:
+        st.markdown("""
+            <style>
+                .stApp {
+                    background-color: #0e1117;
+                    color: #fafafa;
+                }
+                .stMarkdown, .stText {
+                    color: #fafafa;
+                }
+            </style>
+        """, unsafe_allow_html=True)
+
+    st.sidebar.header("🔍 Filters")
 
     # Conference filter
     conferences = ["All"] + sorted(df['conference'].unique().tolist())
@@ -160,29 +178,46 @@ if df is not None:
 
     # Game Predictions Section
     if not predictions_df.empty:
-        st.subheader("🎯 Today's Game Predictions")
+        st.subheader(f"🎯 Today's Game Predictions ({len(predictions_df)} games)")
 
-        for _, game in predictions_df.iterrows():
-            col1, col2, col3 = st.columns([2, 1, 2])
+        # Create compact display dataframe
+        display_predictions = predictions_df.copy()
 
-            with col1:
-                st.markdown(f"**{game['away_team']}**")
-                st.caption(f"Predicted: {game['predicted_away_score']}")
+        # Format matchup column
+        display_predictions['Matchup'] = display_predictions.apply(
+            lambda row: f"{row['away_team']} @ {row['home_team']}", axis=1
+        )
 
-            with col2:
-                st.markdown("**@**")
-                confidence_color = {"High": "🟢", "Medium": "🟡", "Low": "🔴"}
-                st.caption(f"{confidence_color.get(game['confidence'], '⚪')} {game['confidence']}")
+        # Format predicted score
+        display_predictions['Score'] = display_predictions.apply(
+            lambda row: f"{row['predicted_away_score']:.0f} - {row['predicted_home_score']:.0f}", axis=1
+        )
 
-            with col3:
-                st.markdown(f"**{game['home_team']}**")
-                st.caption(f"Predicted: {game['predicted_home_score']}")
+        # Format winner with emoji
+        display_predictions['Prediction'] = display_predictions.apply(
+            lambda row: f"🏆 {row['predicted_winner']}", axis=1
+        )
 
-            # Winner and probability
-            winner_emoji = "🏆" if game['predicted_winner'] == game['home_team'] else "🏆  "
-            st.info(f"{winner_emoji} **{game['predicted_winner']}** ({game['win_probability']:.0%})")
+        # Format probability
+        display_predictions['Win %'] = display_predictions['win_probability'].apply(
+            lambda x: f"{x:.0%}"
+        )
 
-            st.markdown("---")
+        # Add confidence emoji
+        confidence_emoji = {"High": "🟢", "Medium": "🟡", "Low": "🔴"}
+        display_predictions['Conf.'] = display_predictions['confidence'].apply(
+            lambda x: f"{confidence_emoji.get(x, '⚪')} {x}"
+        )
+
+        # Select and display columns
+        compact_df = display_predictions[['Matchup', 'Score', 'Prediction', 'Win %', 'Conf.']]
+
+        st.dataframe(
+            compact_df,
+            use_container_width=True,
+            hide_index=True,
+            height=min(400, len(compact_df) * 35 + 38)  # Dynamic height based on number of games
+        )
 
     # Main rankings table
     st.subheader("📊 Team Rankings")
