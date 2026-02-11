@@ -190,6 +190,14 @@ def upload_to_databricks(df, table_name, year):
         df_clean = df.copy()
         df_clean.columns = [col.replace('-', '_').replace('.', '_').replace(' ', '_') for col in df_clean.columns]
 
+        # Convert numeric columns to proper types
+        for col in df_clean.columns:
+            # Try to convert to numeric, leave as-is if fails
+            try:
+                df_clean[col] = pd.to_numeric(df_clean[col], errors='ignore')
+            except:
+                pass
+
         # Build column definitions from dataframe
         columns = []
         for col in df_clean.columns:
