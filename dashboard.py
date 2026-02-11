@@ -7,6 +7,8 @@ import streamlit as st
 import pandas as pd
 from databricks import sql
 import os
+from datetime import timezone
+import pytz
 
 # Page config
 st.set_page_config(
@@ -64,8 +66,13 @@ with st.spinner("Loading rankings..."):
 if df is not None:
     # Show last updated time
     if 'loaded_at' in df.columns and len(df) > 0:
-        last_updated = df['loaded_at'].iloc[0]
-        st.caption(f"📅 Last updated: {last_updated.strftime('%B %d, %Y at %I:%M %p ET')}")
+        last_updated_utc = df['loaded_at'].iloc[0]
+        # Convert from UTC to Eastern Time
+        eastern = pytz.timezone('US/Eastern')
+        if last_updated_utc.tzinfo is None:
+            last_updated_utc = pytz.utc.localize(last_updated_utc)
+        last_updated_et = last_updated_utc.astimezone(eastern)
+        st.caption(f"📅 Last updated: {last_updated_et.strftime('%B %d, %Y at %I:%M %p ET')}")
 
     # Sidebar filters
     st.sidebar.header("Filters")
