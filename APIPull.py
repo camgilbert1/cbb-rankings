@@ -15,10 +15,10 @@ from databricks import sql
 import os
 
 # =============================================================================
-# CONFIGURATION - Add your KenPom credentials here
+# CONFIGURATION - KenPom credentials from environment variables
 # =============================================================================
-KENPOM_EMAIL = "cameron.gilbert52@gmail.com"  # Replace with your KenPom email
-KENPOM_PASSWORD = "Asurules_32"         # Replace with your KenPom password
+KENPOM_EMAIL = os.getenv("KENPOM_EMAIL", "cameron.gilbert52@gmail.com")
+KENPOM_PASSWORD = os.getenv("KENPOM_PASSWORD", "Asurules_32")
 
 # =============================================================================
 # FETCH DATA
