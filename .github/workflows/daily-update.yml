@@ -1,0 +1,68 @@
+name: Daily Data Update
+
+# Run every day at 6 AM EST (11 AM UTC)
+on:
+  schedule:
+    - cron: '0 11 * * *'
+  # Also allow manual trigger
+  workflow_dispatch:
+
+jobs:
+  update-data:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install kenpompy requests databricks-sql-connector pandas pyarrow
+
+      - name: Run data pull script
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_HTTP_PATH: ${{ secrets.DATABRICKS_HTTP_PATH }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+        run: |
+          python APIPull.py
+
+      - name: Set up dbt
+        run: |
+          pip install dbt-databricks
+
+      - name: Create dbt profiles.yml
+        run: |
+          mkdir -p ~/.dbt
+          cat > ~/.dbt/profiles.yml << EOF
+          cbb_analytics:
+            outputs:
+              dev:
+                catalog: workspace
+                host: ${{ secrets.DATABRICKS_HOST }}
+                http_path: ${{ secrets.DATABRICKS_HTTP_PATH }}
+                schema: default
+                threads: 1
+                token: ${{ secrets.DATABRICKS_TOKEN }}
+                type: databricks
+            target: dev
+          EOF
+
+      - name: Run dbt
+        run: |
+          cd cbb_analytics
+          dbt deps
+          dbt run
+
+      - name: Summary
+        run: |
+          echo "✅ Data pipeline completed successfully!"
+          echo "📊 KenPom data refreshed"
+          echo "🔄 dbt transformations applied"
+          echo "🌐 Dashboard will show updated data"
