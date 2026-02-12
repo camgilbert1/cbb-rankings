@@ -62,7 +62,7 @@ def load_data():
 
 @st.cache_data(ttl=600)  # Cache for 10 minutes
 def load_predictions():
-    """Load today's game predictions from Databricks"""
+    """Load today's game predictions from Databricks with actual results"""
     try:
         connection = sql.connect(
             server_hostname=st.secrets.get("DATABRICKS_HOST", os.getenv("DATABRICKS_HOST")),
@@ -76,20 +76,30 @@ def load_predictions():
 
         cursor.execute(f"""
             SELECT
-                game_time,
-                home_team,
-                away_team,
-                predicted_winner,
-                win_probability,
-                predicted_home_score,
-                predicted_away_score,
-                confidence,
-                vegas_spread,
-                cover_pick,
-                cover_confidence
-            FROM workspace.default.prediction_history
-            WHERE game_date = '{today}'
-            ORDER BY game_time
+                p.game_time,
+                p.home_team,
+                p.away_team,
+                p.predicted_winner,
+                p.win_probability,
+                p.predicted_home_score,
+                p.predicted_away_score,
+                p.confidence,
+                p.vegas_spread,
+                p.cover_pick,
+                p.cover_confidence,
+                r.home_score as actual_home_score,
+                r.away_score as actual_away_score,
+                CASE
+                    WHEN r.home_score IS NOT NULL THEN 'Final'
+                    ELSE 'Scheduled'
+                END as game_status
+            FROM workspace.default.prediction_history p
+            LEFT JOIN workspace.default.game_results r
+                ON p.home_team = r.home_team
+                AND p.away_team = r.away_team
+                AND ABS(DATEDIFF(p.game_date, r.game_date)) <= 1
+            WHERE p.game_date = '{today}'
+            ORDER BY p.game_time
         """)
 
         df = cursor.fetchall_arrow().to_pandas()
@@ -307,15 +317,39 @@ if df is not None:
             lambda row: f"{row['away_team']} @ {row['home_team']}", axis=1
         )
 
+        # Format game status
+        display_predictions['Status'] = display_predictions['game_status']
+
         # Format predicted score
-        display_predictions['Score'] = display_predictions.apply(
+        display_predictions['Pred Score'] = display_predictions.apply(
             lambda row: f"{row['predicted_away_score']:.0f} - {row['predicted_home_score']:.0f}", axis=1
+        )
+
+        # Format actual score (if game is final)
+        display_predictions['Actual Score'] = display_predictions.apply(
+            lambda row: (
+                f"{int(row['actual_away_score'])} - {int(row['actual_home_score'])}"
+                if pd.notna(row['actual_home_score']) and pd.notna(row['actual_away_score'])
+                else "-"
+            ),
+            axis=1
         )
 
         # Format winner with emoji
         display_predictions['Prediction'] = display_predictions.apply(
             lambda row: f"🏆 {row['predicted_winner']}", axis=1
         )
+
+        # Calculate and show actual winner (if game is final)
+        def get_actual_winner(row):
+            if pd.notna(row['actual_home_score']) and pd.notna(row['actual_away_score']):
+                if row['actual_home_score'] > row['actual_away_score']:
+                    return f"✓ {row['home_team']}"
+                else:
+                    return f"✓ {row['away_team']}"
+            return "-"
+
+        display_predictions['Actual Winner'] = display_predictions.apply(get_actual_winner, axis=1)
 
         # Format probability
         display_predictions['Win %'] = display_predictions['win_probability'].apply(
@@ -345,8 +379,30 @@ if df is not None:
             lambda x: f"{confidence_emoji.get(x, '⚪')} {x}"
         )
 
+        # Calculate actual ATS result (if game is final)
+        def get_ats_result(row):
+            if pd.notna(row['actual_home_score']) and pd.notna(row['actual_away_score']) and row['vegas_spread'] != 0:
+                actual_margin = row['actual_home_score'] - row['actual_away_score']
+                actual_adjusted = actual_margin + row['vegas_spread']
+
+                if actual_adjusted > 0:
+                    # Home team covered
+                    return f"✓ {row['home_team']} covered"
+                elif actual_adjusted < 0:
+                    # Away team covered
+                    return f"✓ {row['away_team']} covered"
+                else:
+                    return "Push"
+            return "-"
+
+        display_predictions['Actual ATS'] = display_predictions.apply(get_ats_result, axis=1)
+
         # Select and display columns
-        compact_df = display_predictions[['Matchup', 'Score', 'Spread', 'Prediction', 'Win %', 'Win Conf.', 'ATS Pick', 'ATS Conf.']]
+        compact_df = display_predictions[[
+            'Matchup', 'Status', 'Pred Score', 'Actual Score',
+            'Prediction', 'Actual Winner', 'Win %', 'Win Conf.',
+            'Spread', 'ATS Pick', 'ATS Conf.', 'Actual ATS'
+        ]]
 
         st.dataframe(
             compact_df,
