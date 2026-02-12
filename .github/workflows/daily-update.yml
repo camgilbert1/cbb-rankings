@@ -23,7 +23,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           pip install --upgrade pip
-          pip install kenpompy requests databricks-sql-connector pandas pyarrow
+          pip install kenpompy requests databricks-sql-connector pandas pyarrow python-dotenv
 
       - name: Run data pull script
         env:
