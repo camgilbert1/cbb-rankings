@@ -22,6 +22,26 @@ DATABRICKS_HTTP_PATH = os.getenv("DATABRICKS_HTTP_PATH")
 DATABRICKS_TOKEN = os.getenv("DATABRICKS_TOKEN")
 ODDS_API_KEY = os.getenv("ODDS_API_KEY")
 
+# ESPN to Odds API team name mappings
+# Used when ESPN team names don't match Odds API team names
+# Most cases are handled automatically by the normalization function
+ESPN_TO_ODDS_MAPPING = {
+    # Special cases that need explicit mapping
+    'IU Indianapolis Jaguars': 'IUPUI Jaguars',  # Completely different school name
+    'Purdue Fort Wayne Mastodons': 'Fort Wayne Mastodons',  # Drops "Purdue" prefix
+    'Gardner-Webb Runnin Bulldogs': 'Gardner-Webb Bulldogs',  # Different mascot spelling
+    'Florida International Panthers': "Florida Int'l Golden Panthers",  # Different abbreviation and mascot
+    'Northern Colorado Bears': 'N Colorado Bears',  # "Northern" vs "N"
+    'SIU Edwardsville Cougars': 'SIU-Edwardsville Cougars',  # Dash vs space
+    'Cal State Bakersfield Roadrunners': 'CSU Bakersfield Roadrunners',  # "Cal State" vs "CSU"
+    'Long Beach State Beach': 'Long Beach St 49ers',  # Different abbreviation and mascot
+    'Southeast Missouri State Redhawks': 'SE Missouri St Redhawks',  # "Southeast" vs "SE" + State→St
+    'Sacramento State Hornets': 'Sacramento St Hornets',  # State→St (fallback didn't work)
+    'Hawaii Rainbow Warriors': "Hawai'i Rainbow Warriors",  # Different spelling with apostrophe
+    'Cal State Fullerton Titans': 'CSU Fullerton Titans',  # "Cal State" vs "CSU"
+    # Add more mappings as needed
+}
+
 
 # =============================================================================
 # DATA FETCHING
@@ -83,6 +103,52 @@ def get_vegas_spreads():
     except Exception as e:
         print(f"⚠️  Error fetching spreads: {e}")
         return {}
+
+
+def normalize_team_name_for_odds(espn_team_name, vegas_spreads=None):
+    """
+    Normalize ESPN team name to match Odds API team name
+
+    Args:
+        espn_team_name (str): Team name from ESPN API
+        vegas_spreads (dict): Optional dict of spreads to check against
+
+    Returns:
+        str: Normalized team name for Odds API lookup
+    """
+    # Check if there's a direct mapping (for special cases like IUPUI)
+    if espn_team_name in ESPN_TO_ODDS_MAPPING:
+        return ESPN_TO_ODDS_MAPPING[espn_team_name]
+
+    # If we have spreads dict, try intelligent fallback
+    if vegas_spreads is not None:
+        # First try the original name
+        if espn_team_name in vegas_spreads:
+            return espn_team_name
+
+        # Try replacing "State" with "St" (common Odds API abbreviation)
+        # e.g., "Cleveland State Vikings" -> "Cleveland St Vikings"
+        if ' State ' in espn_team_name:
+            state_abbreviated = espn_team_name.replace(' State ', ' St ')
+            if state_abbreviated in vegas_spreads:
+                return state_abbreviated
+
+        # Try stripping the last word (mascot name)
+        # e.g., "Cleveland State Vikings" -> "Cleveland State"
+        words = espn_team_name.split()
+        if len(words) > 1:
+            team_without_mascot = ' '.join(words[:-1])
+            if team_without_mascot in vegas_spreads:
+                return team_without_mascot
+
+            # Also try with "State" -> "St" and then stripping mascot
+            if ' State ' in team_without_mascot:
+                state_abbreviated_no_mascot = team_without_mascot.replace(' State ', ' St ')
+                if state_abbreviated_no_mascot in vegas_spreads:
+                    return state_abbreviated_no_mascot
+
+    # Return original name as fallback
+    return espn_team_name
 
 
 def get_todays_games():
@@ -502,9 +568,11 @@ def main():
         print(f"\n{home_team} vs {away_team}")
         print("-" * 60)
 
-        # Get Vegas spread
-        home_spread = vegas_spreads.get(home_team)
-        away_spread = vegas_spreads.get(away_team)
+        # Get Vegas spread (normalize team names for Odds API lookup)
+        home_team_normalized = normalize_team_name_for_odds(home_team, vegas_spreads)
+        away_team_normalized = normalize_team_name_for_odds(away_team, vegas_spreads)
+        home_spread = vegas_spreads.get(home_team_normalized)
+        away_spread = vegas_spreads.get(away_team_normalized)
 
         # Calculate features
         features = calculate_matchup_features(home_team, away_team, team_stats)
