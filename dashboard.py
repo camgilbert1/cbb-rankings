@@ -204,9 +204,13 @@ if df is not None:
             lambda x: f"{x:.0%}"
         )
 
-        # Format Vegas spread
+        # Format Vegas spread - show favored team with full name
         display_predictions['Spread'] = display_predictions.apply(
-            lambda row: f"{row['home_team'].split()[-1][:3]} {row['vegas_spread']:+.1f}" if row['vegas_spread'] != 0 else "N/A",
+            lambda row: (
+                f"{row['home_team']} {row['vegas_spread']:.1f}" if row['vegas_spread'] < 0
+                else f"{row['away_team']} -{row['vegas_spread']:.1f}" if row['vegas_spread'] > 0
+                else "N/A"
+            ),
             axis=1
         )
 
