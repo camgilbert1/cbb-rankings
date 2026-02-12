@@ -384,7 +384,12 @@ if df is not None:
 
         # Calculate actual ATS result (if game is final)
         def get_ats_result(row):
-            if pd.notna(row['actual_home_score']) and pd.notna(row['actual_away_score']) and row['vegas_spread'] != 0:
+            # Check if game is finished
+            if pd.notna(row['actual_home_score']) and pd.notna(row['actual_away_score']):
+                # Check if spread was available
+                if row['vegas_spread'] == 0:
+                    return "No spread"
+
                 actual_margin = row['actual_home_score'] - row['actual_away_score']
                 actual_adjusted = actual_margin + row['vegas_spread']
 
