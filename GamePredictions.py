@@ -366,12 +366,10 @@ def upload_predictions_to_databricks(predictions_df):
 
         cursor = connection.cursor()
 
-        # Drop existing predictions table
-        cursor.execute("DROP TABLE IF EXISTS workspace.default.game_predictions")
-
-        # Create table schema
+        # Create table if it doesn't exist (preserve historical predictions)
         cursor.execute("""
-            CREATE TABLE workspace.default.game_predictions (
+            CREATE TABLE IF NOT EXISTS workspace.default.prediction_history (
+                game_date DATE,
                 game_time STRING,
                 home_team STRING,
                 away_team STRING,
@@ -388,10 +386,18 @@ def upload_predictions_to_databricks(predictions_df):
             USING DELTA
         """)
 
+        # Delete today's predictions (avoid duplicates if script runs multiple times)
+        today = datetime.now().strftime('%Y-%m-%d')
+        cursor.execute(f"""
+            DELETE FROM workspace.default.prediction_history
+            WHERE game_date = '{today}'
+        """)
+
         # Insert predictions
         for _, row in predictions_df.iterrows():
             cursor.execute(f"""
-                INSERT INTO workspace.default.game_predictions VALUES (
+                INSERT INTO workspace.default.prediction_history VALUES (
+                    '{row['game_date']}',
                     '{row['game_time']}',
                     '{row['home_team']}',
                     '{row['away_team']}',
@@ -508,7 +514,11 @@ def main():
             print(f"  {factor}")
 
         # Store prediction
+        # Extract game date from game_time or use today's date
+        game_date = game['game_time'].split('T')[0] if 'T' in game['game_time'] else datetime.now().strftime('%Y-%m-%d')
+
         predictions.append({
+            'game_date': game_date,
             'game_time': game['game_time'],
             'home_team': home_team,
             'away_team': away_team,

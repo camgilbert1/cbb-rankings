@@ -71,10 +71,19 @@ jobs:
         run: |
           python GamePredictions.py
 
+      - name: Update game results
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_HTTP_PATH: ${{ secrets.DATABRICKS_HTTP_PATH }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+        run: |
+          python UpdateResults.py
+
       - name: Summary
         run: |
           echo "✅ Data pipeline completed successfully!"
           echo "📊 KenPom data refreshed"
           echo "🔄 dbt transformations applied"
           echo "🎯 Game predictions generated"
+          echo "📈 Game results updated"
           echo "🌐 Dashboard will show updated data"

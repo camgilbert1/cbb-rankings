@@ -71,7 +71,10 @@ def load_predictions():
         )
 
         cursor = connection.cursor()
-        cursor.execute("""
+        # Get today's date in YYYY-MM-DD format
+        today = pd.Timestamp.now().strftime('%Y-%m-%d')
+
+        cursor.execute(f"""
             SELECT
                 game_time,
                 home_team,
@@ -84,7 +87,8 @@ def load_predictions():
                 vegas_spread,
                 cover_pick,
                 cover_confidence
-            FROM workspace.default.game_predictions
+            FROM workspace.default.prediction_history
+            WHERE game_date = '{today}'
             ORDER BY game_time
         """)
 
@@ -96,6 +100,107 @@ def load_predictions():
     except Exception as e:
         # Return empty dataframe if no predictions exist yet
         return pd.DataFrame()
+
+
+@st.cache_data(ttl=600)  # Cache for 10 minutes
+def load_performance(time_period):
+    """Load prediction performance metrics from Databricks
+
+    Args:
+        time_period (str): "Yesterday", "Last 7 Days", "Last 30 Days", or "All Time"
+
+    Returns:
+        dict: Performance metrics by confidence level
+    """
+    try:
+        connection = sql.connect(
+            server_hostname=st.secrets.get("DATABRICKS_HOST", os.getenv("DATABRICKS_HOST")),
+            http_path=st.secrets.get("DATABRICKS_HTTP_PATH", os.getenv("DATABRICKS_HTTP_PATH")),
+            access_token=st.secrets.get("DATABRICKS_TOKEN", os.getenv("DATABRICKS_TOKEN"))
+        )
+
+        cursor = connection.cursor()
+
+        # Calculate date filter based on time period
+        today = pd.Timestamp.now()
+        if time_period == "Yesterday":
+            date_filter = f"AND p.game_date = '{(today - pd.Timedelta(days=1)).strftime('%Y-%m-%d')}'"
+        elif time_period == "Last 7 Days":
+            date_filter = f"AND p.game_date >= '{(today - pd.Timedelta(days=7)).strftime('%Y-%m-%d')}'"
+        elif time_period == "Last 30 Days":
+            date_filter = f"AND p.game_date >= '{(today - pd.Timedelta(days=30)).strftime('%Y-%m-%d')}'"
+        else:  # All Time
+            date_filter = ""
+
+        # Query to join predictions with results and calculate performance
+        cursor.execute(f"""
+            WITH matched_games AS (
+                SELECT
+                    p.game_date,
+                    p.home_team,
+                    p.away_team,
+                    p.predicted_winner,
+                    p.predicted_home_score,
+                    p.predicted_away_score,
+                    p.confidence,
+                    p.vegas_spread,
+                    p.cover_pick,
+                    r.home_score AS actual_home_score,
+                    r.away_score AS actual_away_score,
+                    CASE
+                        WHEN r.home_score > r.away_score THEN p.home_team
+                        ELSE p.away_team
+                    END AS actual_winner,
+                    (r.home_score - r.away_score) AS actual_margin
+                FROM workspace.default.prediction_history p
+                INNER JOIN workspace.default.game_results r
+                    ON p.game_date = r.game_date
+                    AND p.home_team = r.home_team
+                    AND p.away_team = r.away_team
+                WHERE 1=1 {date_filter}
+            )
+            SELECT
+                confidence,
+                COUNT(*) as total_games,
+                SUM(CASE WHEN predicted_winner = actual_winner THEN 1 ELSE 0 END) as su_wins,
+                SUM(CASE WHEN predicted_winner != actual_winner THEN 1 ELSE 0 END) as su_losses,
+                SUM(CASE
+                    WHEN vegas_spread < 0 AND actual_margin + vegas_spread > 0 THEN 1
+                    WHEN vegas_spread > 0 AND actual_margin + vegas_spread < 0 THEN 1
+                    ELSE 0
+                END) as ats_wins,
+                SUM(CASE
+                    WHEN vegas_spread < 0 AND actual_margin + vegas_spread <= 0 THEN 1
+                    WHEN vegas_spread > 0 AND actual_margin + vegas_spread >= 0 THEN 1
+                    ELSE 0
+                END) as ats_losses
+            FROM matched_games
+            WHERE confidence IN ('High', 'Medium', 'Low')
+            GROUP BY confidence
+        """)
+
+        results = cursor.fetchall()
+        cursor.close()
+        connection.close()
+
+        # Convert to dictionary
+        performance = {}
+        for row in results:
+            confidence = row[0]
+            performance[confidence] = {
+                'total': row[1],
+                'su_wins': row[2],
+                'su_losses': row[3],
+                'ats_wins': row[4],
+                'ats_losses': row[5]
+            }
+
+        return performance
+
+    except Exception as e:
+        # Return empty dict if no data
+        return {}
+
 
 # Load data
 with st.spinner("Loading rankings..."):
@@ -274,6 +379,98 @@ if df is not None:
         file_name="cbb_rankings.csv",
         mime="text/csv"
     )
+
+    # Prediction Performance Tracker
+    st.markdown("---")
+    st.subheader("📈 Prediction Performance")
+
+    # Time period selector
+    time_period = st.selectbox(
+        "Time Period",
+        ["Yesterday", "Last 7 Days", "Last 30 Days", "All Time"],
+        index=3  # Default to "All Time"
+    )
+
+    # Load performance data
+    performance = load_performance(time_period)
+
+    if performance:
+        # Display performance by confidence level
+        col1, col2, col3 = st.columns(3)
+
+        # High Confidence
+        with col1:
+            if 'High' in performance:
+                p = performance['High']
+                su_pct = (p['su_wins'] / p['total'] * 100) if p['total'] > 0 else 0
+                ats_pct = (p['ats_wins'] / p['total'] * 100) if p['total'] > 0 else 0
+                st.metric(
+                    "🟢 High Confidence",
+                    f"{p['total']} games",
+                    delta=None
+                )
+                st.write(f"**SU:** {p['su_wins']}-{p['su_losses']} ({su_pct:.0f}%)")
+                st.write(f"**ATS:** {p['ats_wins']}-{p['ats_losses']} ({ats_pct:.0f}%)")
+            else:
+                st.metric("🟢 High Confidence", "0-0")
+                st.write("**SU:** 0-0 (0%)")
+                st.write("**ATS:** 0-0 (0%)")
+
+        # Medium Confidence
+        with col2:
+            if 'Medium' in performance:
+                p = performance['Medium']
+                su_pct = (p['su_wins'] / p['total'] * 100) if p['total'] > 0 else 0
+                ats_pct = (p['ats_wins'] / p['total'] * 100) if p['total'] > 0 else 0
+                st.metric(
+                    "🟡 Medium Confidence",
+                    f"{p['total']} games",
+                    delta=None
+                )
+                st.write(f"**SU:** {p['su_wins']}-{p['su_losses']} ({su_pct:.0f}%)")
+                st.write(f"**ATS:** {p['ats_wins']}-{p['ats_losses']} ({ats_pct:.0f}%)")
+            else:
+                st.metric("🟡 Medium Confidence", "0-0")
+                st.write("**SU:** 0-0 (0%)")
+                st.write("**ATS:** 0-0 (0%)")
+
+        # Low Confidence
+        with col3:
+            if 'Low' in performance:
+                p = performance['Low']
+                su_pct = (p['su_wins'] / p['total'] * 100) if p['total'] > 0 else 0
+                ats_pct = (p['ats_wins'] / p['total'] * 100) if p['total'] > 0 else 0
+                st.metric(
+                    "🔴 Low Confidence",
+                    f"{p['total']} games",
+                    delta=None
+                )
+                st.write(f"**SU:** {p['su_wins']}-{p['su_losses']} ({su_pct:.0f}%)")
+                st.write(f"**ATS:** {p['ats_wins']}-{p['ats_losses']} ({ats_pct:.0f}%)")
+            else:
+                st.metric("🔴 Low Confidence", "0-0")
+                st.write("**SU:** 0-0 (0%)")
+                st.write("**ATS:** 0-0 (0%)")
+
+        # Overall stats
+        if performance:
+            total_games = sum(p['total'] for p in performance.values())
+            total_su_wins = sum(p['su_wins'] for p in performance.values())
+            total_su_losses = sum(p['su_losses'] for p in performance.values())
+            total_ats_wins = sum(p['ats_wins'] for p in performance.values())
+            total_ats_losses = sum(p['ats_losses'] for p in performance.values())
+
+            if total_games > 0:
+                st.markdown("---")
+                col1, col2 = st.columns(2)
+                with col1:
+                    su_pct = (total_su_wins / total_games * 100) if total_games > 0 else 0
+                    st.metric("Overall Straight Up", f"{total_su_wins}-{total_su_losses} ({su_pct:.1f}%)")
+                with col2:
+                    ats_pct = (total_ats_wins / total_games * 100) if total_games > 0 else 0
+                    st.metric("Overall Against The Spread", f"{total_ats_wins}-{total_ats_losses} ({ats_pct:.1f}%)")
+    else:
+        st.info("No completed games with predictions yet. Performance tracking will begin after games are played!")
 
     # Footer
     st.markdown("---")
