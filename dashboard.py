@@ -407,6 +407,11 @@ if df is not None:
 
         display_predictions['Actual ATS'] = display_predictions.apply(get_ats_result, axis=1)
 
+        # Sort by ATS confidence (High -> Medium -> Low)
+        confidence_order = {'High': 0, 'Medium': 1, 'Low': 2}
+        display_predictions['conf_sort'] = display_predictions['cover_confidence'].map(confidence_order)
+        display_predictions = display_predictions.sort_values('conf_sort')
+
         # Select and display columns
         compact_df = display_predictions[[
             'Matchup', 'Status', 'Spread', 'Pred Score', 'ATS Pick', 'ATS Conf.', 'Prediction',
