@@ -9,6 +9,7 @@ from databricks import sql
 import os
 from datetime import datetime
 from dotenv import load_dotenv
+import pytz
 
 # Load environment variables from .env file for local development
 load_dotenv()
@@ -395,10 +396,13 @@ def upload_predictions_to_databricks(predictions_df):
         print("  Removing old predictions for unstarted games...")
         deleted_count = 0
         for _, row in predictions_df.iterrows():
+            # Escape single quotes in team names to prevent SQL injection
+            home_team_escaped = row['home_team'].replace("'", "''")
+            away_team_escaped = row['away_team'].replace("'", "''")
             cursor.execute(f"""
                 DELETE FROM workspace.default.prediction_history
-                WHERE home_team = '{row['home_team']}'
-                  AND away_team = '{row['away_team']}'
+                WHERE home_team = '{home_team_escaped}'
+                  AND away_team = '{away_team_escaped}'
                   AND game_date = '{row['game_date']}'
             """)
             deleted_count += 1
@@ -406,19 +410,25 @@ def upload_predictions_to_databricks(predictions_df):
 
         # Insert predictions
         for _, row in predictions_df.iterrows():
+            # Escape single quotes in team names and text fields to prevent SQL injection
+            home_team_escaped = row['home_team'].replace("'", "''")
+            away_team_escaped = row['away_team'].replace("'", "''")
+            predicted_winner_escaped = row['predicted_winner'].replace("'", "''")
+            cover_pick_escaped = row['cover_pick'].replace("'", "''")
+
             cursor.execute(f"""
                 INSERT INTO workspace.default.prediction_history VALUES (
                     '{row['game_date']}',
                     '{row['game_time']}',
-                    '{row['home_team']}',
-                    '{row['away_team']}',
-                    '{row['predicted_winner']}',
+                    '{home_team_escaped}',
+                    '{away_team_escaped}',
+                    '{predicted_winner_escaped}',
                     {row['win_probability']},
                     {row['predicted_home_score']},
                     {row['predicted_away_score']},
                     '{row['confidence']}',
                     {row['vegas_spread']},
-                    '{row['cover_pick']}',
+                    '{cover_pick_escaped}',
                     '{row['cover_confidence']}',
                     current_timestamp()
                 )
@@ -542,8 +552,16 @@ def main():
             print(f"  {factor}")
 
         # Store prediction
-        # Extract game date from game_time or use today's date
-        game_date = game['game_time'].split('T')[0] if 'T' in game['game_time'] else datetime.now().strftime('%Y-%m-%d')
+        # Extract game date from game_time, converting from UTC to Eastern Time
+        if 'T' in game['game_time']:
+            # Parse UTC timestamp and convert to Eastern Time
+            utc_time = datetime.strptime(game['game_time'], '%Y-%m-%dT%H:%MZ')
+            utc_time = pytz.utc.localize(utc_time)
+            eastern = pytz.timezone('US/Eastern')
+            eastern_time = utc_time.astimezone(eastern)
+            game_date = eastern_time.strftime('%Y-%m-%d')
+        else:
+            game_date = datetime.now().strftime('%Y-%m-%d')
 
         predictions.append({
             'game_date': game_date,
