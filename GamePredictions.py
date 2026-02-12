@@ -49,6 +49,10 @@ def get_vegas_spreads():
         response = requests.get(url, params=params)
         response.raise_for_status()
 
+        # Log API usage
+        remaining = response.headers.get('x-requests-remaining', 'unknown')
+        print(f"  Odds API requests remaining: {remaining}")
+
         data = response.json()
 
         # Build mapping of team names to spreads
