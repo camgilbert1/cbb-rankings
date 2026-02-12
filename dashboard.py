@@ -414,7 +414,7 @@ if df is not None:
 
         # Select and display columns
         compact_df = display_predictions[[
-            'Matchup', 'Status', 'Spread', 'Pred Score', 'ATS Pick', 'ATS Conf.', 'Prediction',
+            'Matchup', 'Status', 'Spread', 'Prediction', 'Pred Score', 'ATS Pick', 'ATS Conf.',
             'Actual Score', 'Actual Winner', 'Win %', 'Win Conf.', 'Actual ATS'
         ]]
 
