@@ -71,8 +71,9 @@ def load_predictions():
         )
 
         cursor = connection.cursor()
-        # Get today's date in YYYY-MM-DD format
-        today = pd.Timestamp.now().strftime('%Y-%m-%d')
+        # Get today's date in Eastern Time (not UTC)
+        eastern = pytz.timezone('US/Eastern')
+        today = pd.Timestamp.now(tz=eastern).strftime('%Y-%m-%d')
 
         cursor.execute(f"""
             SELECT
@@ -131,8 +132,9 @@ def load_performance(time_period):
 
         cursor = connection.cursor()
 
-        # Calculate date filter based on time period
-        today = pd.Timestamp.now()
+        # Calculate date filter based on time period (use Eastern Time)
+        eastern = pytz.timezone('US/Eastern')
+        today = pd.Timestamp.now(tz=eastern)
         if time_period == "Today":
             date_filter = f"AND p.game_date = '{today.strftime('%Y-%m-%d')}'"
         elif time_period == "Yesterday":
