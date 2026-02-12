@@ -532,7 +532,8 @@ def main():
         print(f"Predicted Winner: {prediction['predicted_winner']} ({prediction['win_probability']:.0%} confidence)")
         print(f"Predicted Score: {home_team} {prediction['predicted_home_score']}, {away_team} {prediction['predicted_away_score']}")
         if home_spread is not None:
-            spread_text = f"{home_team} {home_spread:+.1f}" if home_spread < 0 else f"{away_team} {away_spread:+.1f}"
+            # Show the favored team with the spread (home_spread < 0 means home favored)
+            spread_text = f"{home_team} {home_spread:+.1f}" if home_spread < 0 else f"{away_team} {-home_spread:+.1f}"
             print(f"Vegas Spread: {spread_text}")
             print(f"Cover Pick: {cover_pick} (Confidence: {cover_confidence})")
         print(f"Confidence Level: {prediction['confidence']}")
