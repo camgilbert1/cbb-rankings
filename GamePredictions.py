@@ -386,12 +386,19 @@ def upload_predictions_to_databricks(predictions_df):
             USING DELTA
         """)
 
-        # Delete today's predictions (avoid duplicates if script runs multiple times)
-        today = datetime.now().strftime('%Y-%m-%d')
-        cursor.execute(f"""
-            DELETE FROM workspace.default.prediction_history
-            WHERE game_date = '{today}'
-        """)
+        # Delete ONLY predictions for games we're about to regenerate
+        # This preserves predictions for games that have already started (lock mechanism)
+        print("  Removing old predictions for unstarted games...")
+        deleted_count = 0
+        for _, row in predictions_df.iterrows():
+            cursor.execute(f"""
+                DELETE FROM workspace.default.prediction_history
+                WHERE home_team = '{row['home_team']}'
+                  AND away_team = '{row['away_team']}'
+                  AND game_date = '{row['game_date']}'
+            """)
+            deleted_count += 1
+        print(f"  ✓ Removed {deleted_count} old predictions")
 
         # Insert predictions
         for _, row in predictions_df.iterrows():
@@ -441,6 +448,22 @@ def main():
         print("\nNo games scheduled for today.")
         return
 
+    # Filter to only games that haven't started yet (lock mechanism)
+    unstarted_games = games[games['status'] == 'STATUS_SCHEDULED'].copy()
+    started_games = games[games['status'] != 'STATUS_SCHEDULED']
+
+    if not started_games.empty:
+        print(f"\n🔒 LOCKED PREDICTIONS: {len(started_games)} games already started/finished")
+        print("   (Keeping existing predictions for these games)")
+        for _, game in started_games.iterrows():
+            print(f"   - {game['away_team']} @ {game['home_team']} ({game['status']})")
+
+    if unstarted_games.empty:
+        print("\n⚠️  All games have already started. No new predictions to generate.")
+        return
+
+    print(f"\n🔓 GENERATING NEW PREDICTIONS: {len(unstarted_games)} games not yet started")
+
     # Get Vegas spreads
     vegas_spreads = get_vegas_spreads()
 
@@ -458,7 +481,7 @@ def main():
 
     predictions = []
 
-    for _, game in games.iterrows():
+    for _, game in unstarted_games.iterrows():
         home_team = game['home_team']
         away_team = game['away_team']
 
