@@ -222,15 +222,15 @@ if df is not None:
             lambda x: f"{confidence_emoji.get(x, '⚪')} {x}"
         )
 
-        # Add cover pick with confidence
-        display_predictions['Cover Pick'] = display_predictions['cover_pick']
+        # Add ATS pick with confidence
+        display_predictions['ATS Pick'] = display_predictions['cover_pick']
 
-        display_predictions['Cover Conf.'] = display_predictions['cover_confidence'].apply(
+        display_predictions['ATS Conf.'] = display_predictions['cover_confidence'].apply(
             lambda x: f"{confidence_emoji.get(x, '⚪')} {x}"
         )
 
         # Select and display columns
-        compact_df = display_predictions[['Matchup', 'Score', 'Spread', 'Prediction', 'Win %', 'Win Conf.', 'Cover Pick', 'Cover Conf.']]
+        compact_df = display_predictions[['Matchup', 'Score', 'Spread', 'Prediction', 'Win %', 'Win Conf.', 'ATS Pick', 'ATS Conf.']]
 
         st.dataframe(
             compact_df,

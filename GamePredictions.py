@@ -473,17 +473,18 @@ def main():
         predicted_margin = prediction['predicted_home_score'] - prediction['predicted_away_score']
 
         if home_spread is not None and home_spread != 0:
-            # Spread differential (positive = home covers, negative = away covers)
-            spread_diff = predicted_margin - home_spread
+            # Adjusted margin = predicted margin accounting for spread
+            # Positive = home covers, negative = away covers
+            adjusted_margin = predicted_margin + home_spread
 
             # Determine cover pick
-            if spread_diff > 0:
+            if adjusted_margin > 0:
                 cover_pick = f"{home_team} {home_spread:+.1f}"
             else:
                 cover_pick = f"{away_team} {-home_spread:+.1f}"
 
-            # Determine cover confidence based on margin
-            abs_diff = abs(spread_diff)
+            # Determine cover confidence based on adjusted margin
+            abs_diff = abs(adjusted_margin)
             if abs_diff > 5:
                 cover_confidence = 'High'
             elif abs_diff > 2:
