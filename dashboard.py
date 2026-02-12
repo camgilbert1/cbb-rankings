@@ -409,8 +409,8 @@ if df is not None:
 
         # Select and display columns
         compact_df = display_predictions[[
-            'Matchup', 'Status', 'Spread', 'Pred Score', 'ATS Pick', 'Prediction',
-            'Actual Score', 'Actual Winner', 'Win %', 'Win Conf.', 'ATS Conf.', 'Actual ATS'
+            'Matchup', 'Status', 'Spread', 'Pred Score', 'ATS Pick', 'ATS Conf.', 'Prediction',
+            'Actual Score', 'Actual Winner', 'Win %', 'Win Conf.', 'Actual ATS'
         ]]
 
         st.dataframe(
