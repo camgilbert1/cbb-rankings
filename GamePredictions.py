@@ -381,6 +381,8 @@ def upload_predictions_to_databricks(predictions_df):
                 predicted_away_score DOUBLE,
                 confidence STRING,
                 vegas_spread DOUBLE,
+                cover_pick STRING,
+                cover_confidence STRING,
                 prediction_date TIMESTAMP
             )
             USING DELTA
@@ -399,6 +401,8 @@ def upload_predictions_to_databricks(predictions_df):
                     {row['predicted_away_score']},
                     '{row['confidence']}',
                     {row['vegas_spread']},
+                    '{row['cover_pick']}',
+                    '{row['cover_confidence']}',
                     current_timestamp()
                 )
             """)
@@ -465,12 +469,38 @@ def main():
         # Predict
         prediction = predict_game(home_team, away_team, features)
 
+        # Calculate cover pick (Against The Spread)
+        predicted_margin = prediction['predicted_home_score'] - prediction['predicted_away_score']
+
+        if home_spread is not None and home_spread != 0:
+            # Spread differential (positive = home covers, negative = away covers)
+            spread_diff = predicted_margin - home_spread
+
+            # Determine cover pick
+            if spread_diff > 0:
+                cover_pick = f"{home_team} {home_spread:+.1f}"
+            else:
+                cover_pick = f"{away_team} {-home_spread:+.1f}"
+
+            # Determine cover confidence based on margin
+            abs_diff = abs(spread_diff)
+            if abs_diff > 5:
+                cover_confidence = 'High'
+            elif abs_diff > 2:
+                cover_confidence = 'Medium'
+            else:
+                cover_confidence = 'Low'
+        else:
+            cover_pick = 'N/A'
+            cover_confidence = 'N/A'
+
         # Display prediction
         print(f"Predicted Winner: {prediction['predicted_winner']} ({prediction['win_probability']:.0%} confidence)")
         print(f"Predicted Score: {home_team} {prediction['predicted_home_score']}, {away_team} {prediction['predicted_away_score']}")
         if home_spread is not None:
             spread_text = f"{home_team} {home_spread:+.1f}" if home_spread < 0 else f"{away_team} {away_spread:+.1f}"
             print(f"Vegas Spread: {spread_text}")
+            print(f"Cover Pick: {cover_pick} (Confidence: {cover_confidence})")
         print(f"Confidence Level: {prediction['confidence']}")
         print(f"\nKey Factors:")
         for factor in prediction['key_factors']:
@@ -486,7 +516,9 @@ def main():
             'predicted_home_score': prediction['predicted_home_score'],
             'predicted_away_score': prediction['predicted_away_score'],
             'confidence': prediction['confidence'],
-            'vegas_spread': home_spread if home_spread is not None else 0.0
+            'vegas_spread': home_spread if home_spread is not None else 0.0,
+            'cover_pick': cover_pick,
+            'cover_confidence': cover_confidence
         })
 
     # Convert to DataFrame

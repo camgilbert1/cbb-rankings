@@ -81,7 +81,9 @@ def load_predictions():
                 predicted_home_score,
                 predicted_away_score,
                 confidence,
-                vegas_spread
+                vegas_spread,
+                cover_pick,
+                cover_confidence
             FROM workspace.default.game_predictions
             ORDER BY game_time
         """)
@@ -215,13 +217,20 @@ if df is not None:
         )
 
         # Add confidence emoji
-        confidence_emoji = {"High": "🟢", "Medium": "🟡", "Low": "🔴"}
-        display_predictions['Conf.'] = display_predictions['confidence'].apply(
+        confidence_emoji = {"High": "🟢", "Medium": "🟡", "Low": "🔴", "N/A": "⚪"}
+        display_predictions['Win Conf.'] = display_predictions['confidence'].apply(
+            lambda x: f"{confidence_emoji.get(x, '⚪')} {x}"
+        )
+
+        # Add cover pick with confidence
+        display_predictions['Cover Pick'] = display_predictions['cover_pick']
+
+        display_predictions['Cover Conf.'] = display_predictions['cover_confidence'].apply(
             lambda x: f"{confidence_emoji.get(x, '⚪')} {x}"
         )
 
         # Select and display columns
-        compact_df = display_predictions[['Matchup', 'Score', 'Spread', 'Prediction', 'Win %', 'Conf.']]
+        compact_df = display_predictions[['Matchup', 'Score', 'Spread', 'Prediction', 'Win %', 'Win Conf.', 'Cover Pick', 'Cover Conf.']]
 
         st.dataframe(
             compact_df,
