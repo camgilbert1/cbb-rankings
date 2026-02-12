@@ -152,41 +152,56 @@ def main():
     print("COLLEGE BASKETBALL GAME RESULTS UPDATE")
     print("="*80)
 
-    # Get yesterday's date
-    yesterday = datetime.now() - timedelta(days=1)
-    date_str = yesterday.strftime('%Y%m%d')
+    # Check both today and yesterday for completed games
+    today = datetime.now()
+    yesterday = today - timedelta(days=1)
 
-    print(f"Date: {yesterday.strftime('%B %d, %Y')}\n")
+    dates_to_check = [
+        (today, "Today"),
+        (yesterday, "Yesterday")
+    ]
 
-    # Fetch completed games
-    results_df = get_completed_games(date_str)
+    all_results = []
 
-    if results_df.empty:
-        print("\nNo completed games found for yesterday.")
-        return
+    for date_obj, label in dates_to_check:
+        date_str = date_obj.strftime('%Y%m%d')
+        print(f"\n{label}: {date_obj.strftime('%B %d, %Y')}")
 
-    # Display results
-    print("\n" + "="*80)
-    print("COMPLETED GAMES")
-    print("="*80)
-    for _, game in results_df.iterrows():
-        print(f"{game['away_team']} {game['away_score']} @ {game['home_team']} {game['home_score']}")
+        # Fetch completed games for this date
+        results_df = get_completed_games(date_str)
 
-    # Upload to Databricks
-    if DATABRICKS_HOST and DATABRICKS_HTTP_PATH and DATABRICKS_TOKEN:
-        store_results_to_databricks(results_df)
+        if not results_df.empty:
+            all_results.append(results_df)
+
+            # Display results
+            print("\n" + "-"*80)
+            print(f"COMPLETED GAMES - {label.upper()}")
+            print("-"*80)
+            for _, game in results_df.iterrows():
+                print(f"{game['away_team']} {game['away_score']} @ {game['home_team']} {game['home_score']}")
+
+            # Upload to Databricks
+            if DATABRICKS_HOST and DATABRICKS_HTTP_PATH and DATABRICKS_TOKEN:
+                store_results_to_databricks(results_df)
+        else:
+            print(f"  No completed games found for {label.lower()}")
+
+    # Combine all results for backup
+    if all_results:
+        combined_results = pd.concat(all_results, ignore_index=True)
+        combined_results.to_csv("recent_results.csv", index=False)
+        print(f"\n✓ All results saved to: recent_results.csv")
     else:
-        print("\n⚠️  Databricks credentials not found. Results not uploaded.")
+        print("\n⚠️  No completed games found for today or yesterday.")
 
-    # Save locally as backup
-    results_df.to_csv("yesterdays_results.csv", index=False)
-    print(f"\n✓ Results saved to: yesterdays_results.csv")
+    if not (DATABRICKS_HOST and DATABRICKS_HTTP_PATH and DATABRICKS_TOKEN):
+        print("\n⚠️  Databricks credentials not found. Results not uploaded.")
 
     print("\n" + "="*80)
     print(f"✅ Results update completed successfully!")
     print("="*80)
 
-    return results_df
+    return pd.concat(all_results, ignore_index=True) if all_results else pd.DataFrame()
 
 
 if __name__ == "__main__":
