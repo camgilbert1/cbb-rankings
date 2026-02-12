@@ -107,7 +107,7 @@ def load_performance(time_period):
     """Load prediction performance metrics from Databricks
 
     Args:
-        time_period (str): "Yesterday", "Last 7 Days", "Last 30 Days", or "All Time"
+        time_period (str): "Today", "Yesterday", "Last 7 Days", "Last 30 Days", or "All Time"
 
     Returns:
         dict: Performance metrics by confidence level
@@ -123,7 +123,9 @@ def load_performance(time_period):
 
         # Calculate date filter based on time period
         today = pd.Timestamp.now()
-        if time_period == "Yesterday":
+        if time_period == "Today":
+            date_filter = f"AND p.game_date = '{today.strftime('%Y-%m-%d')}'"
+        elif time_period == "Yesterday":
             date_filter = f"AND p.game_date = '{(today - pd.Timedelta(days=1)).strftime('%Y-%m-%d')}'"
         elif time_period == "Last 7 Days":
             date_filter = f"AND p.game_date >= '{(today - pd.Timedelta(days=7)).strftime('%Y-%m-%d')}'"
@@ -133,6 +135,7 @@ def load_performance(time_period):
             date_filter = ""
 
         # Query to join predictions with results and calculate performance
+        # Join on team matchup within ±1 day to handle ESPN API date inconsistencies
         cursor.execute(f"""
             WITH matched_games AS (
                 SELECT
@@ -154,9 +157,9 @@ def load_performance(time_period):
                     (r.home_score - r.away_score) AS actual_margin
                 FROM workspace.default.prediction_history p
                 INNER JOIN workspace.default.game_results r
-                    ON p.game_date = r.game_date
-                    AND p.home_team = r.home_team
+                    ON p.home_team = r.home_team
                     AND p.away_team = r.away_team
+                    AND ABS(DATEDIFF(p.game_date, r.game_date)) <= 1
                 WHERE 1=1 {date_filter}
             )
             SELECT
@@ -165,13 +168,21 @@ def load_performance(time_period):
                 SUM(CASE WHEN predicted_winner = actual_winner THEN 1 ELSE 0 END) as su_wins,
                 SUM(CASE WHEN predicted_winner != actual_winner THEN 1 ELSE 0 END) as su_losses,
                 SUM(CASE
-                    WHEN vegas_spread < 0 AND actual_margin + vegas_spread > 0 THEN 1
-                    WHEN vegas_spread > 0 AND actual_margin + vegas_spread < 0 THEN 1
+                    -- We picked home (adjusted > 0) and home covered (actual adjusted > 0)
+                    WHEN (predicted_home_score - predicted_away_score + vegas_spread) > 0
+                         AND (actual_margin + vegas_spread) > 0 THEN 1
+                    -- We picked away (adjusted <= 0) and away covered (actual adjusted < 0)
+                    WHEN (predicted_home_score - predicted_away_score + vegas_spread) <= 0
+                         AND (actual_margin + vegas_spread) < 0 THEN 1
                     ELSE 0
                 END) as ats_wins,
                 SUM(CASE
-                    WHEN vegas_spread < 0 AND actual_margin + vegas_spread <= 0 THEN 1
-                    WHEN vegas_spread > 0 AND actual_margin + vegas_spread >= 0 THEN 1
+                    -- We picked home (adjusted > 0) but away covered (actual adjusted < 0)
+                    WHEN (predicted_home_score - predicted_away_score + vegas_spread) > 0
+                         AND (actual_margin + vegas_spread) < 0 THEN 1
+                    -- We picked away (adjusted <= 0) but home covered (actual adjusted > 0)
+                    WHEN (predicted_home_score - predicted_away_score + vegas_spread) <= 0
+                         AND (actual_margin + vegas_spread) > 0 THEN 1
                     ELSE 0
                 END) as ats_losses
             FROM matched_games
@@ -387,8 +398,8 @@ if df is not None:
     # Time period selector
     time_period = st.selectbox(
         "Time Period",
-        ["Yesterday", "Last 7 Days", "Last 30 Days", "All Time"],
-        index=3  # Default to "All Time"
+        ["Today", "Yesterday", "Last 7 Days", "Last 30 Days", "All Time"],
+        index=4  # Default to "All Time"
     )
 
     # Load performance data
