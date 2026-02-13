@@ -32,8 +32,9 @@ def get_completed_games(date_str):
     print(f"Fetching completed games for {date_str}...")
 
     try:
-        url = f"https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard?dates={date_str}"
-        response = requests.get(url)
+        url = "https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard"
+        params = {'dates': date_str, 'limit': 300, 'groups': 50}
+        response = requests.get(url, params=params)
         response.raise_for_status()
 
         data = response.json()
