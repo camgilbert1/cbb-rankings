@@ -303,6 +303,10 @@ def run_bracket_predictions(first_four, first_round, team_stats):
         features = calculate_matchup_features(home_kenpom, away_kenpom, team_stats)
         prediction = predict_game(home_kenpom, away_kenpom, features)
 
+        # Reverse-map predicted winner from KenPom name back to BracketMatrix display name
+        kenpom_to_bm = {v: k for k, v in BRACKETMATRIX_TO_KENPOM.items()}
+        predicted_winner_display = kenpom_to_bm.get(prediction['predicted_winner'], prediction['predicted_winner'])
+
         records.append({
             'round': matchup['round'],
             'region': matchup['region'],
@@ -310,7 +314,7 @@ def run_bracket_predictions(first_four, first_round, team_stats):
             'top_team': home_team,
             'low_seed': matchup['low_seed'],
             'low_team': away_team,
-            'predicted_winner': prediction['predicted_winner'],
+            'predicted_winner': predicted_winner_display,
             'win_probability': prediction['win_probability'],
             'predicted_top_score': prediction['predicted_home_score'],
             'predicted_low_score': prediction['predicted_away_score'],
@@ -318,7 +322,7 @@ def run_bracket_predictions(first_four, first_round, team_stats):
             'updated_at': datetime.now().isoformat()
         })
 
-        print(f"    → {prediction['predicted_winner']} ({prediction['win_probability']:.0%}, {prediction['confidence']})")
+        print(f"    → {predicted_winner_display} ({prediction['win_probability']:.0%}, {prediction['confidence']})")
 
     return records
 
