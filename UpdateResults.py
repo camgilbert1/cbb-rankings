@@ -126,11 +126,13 @@ def store_results_to_databricks(results_df):
 
         # Insert results
         for _, row in results_df.iterrows():
+            home_team_esc = row['home_team'].replace("'", "''")
+            away_team_esc = row['away_team'].replace("'", "''")
             cursor.execute(f"""
                 INSERT INTO workspace.default.game_results VALUES (
                     '{row['game_date']}',
-                    '{row['home_team']}',
-                    '{row['away_team']}',
+                    '{home_team_esc}',
+                    '{away_team_esc}',
                     {row['home_score']},
                     {row['away_score']},
                     current_timestamp()
