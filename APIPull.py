@@ -17,8 +17,8 @@ import os
 # =============================================================================
 # CONFIGURATION - KenPom credentials from environment variables
 # =============================================================================
-KENPOM_EMAIL = os.getenv("KENPOM_EMAIL", "cameron.gilbert52@gmail.com")
-KENPOM_PASSWORD = os.getenv("KENPOM_PASSWORD", "Asurules_32")
+KENPOM_EMAIL = os.getenv("KENPOM_EMAIL")
+KENPOM_PASSWORD = os.getenv("KENPOM_PASSWORD")
 
 # =============================================================================
 # FETCH DATA
