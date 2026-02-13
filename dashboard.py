@@ -102,7 +102,6 @@ def load_predictions():
                 AND ABS(DATEDIFF(p.game_date, r.game_date)) <= 1
             WHERE p.game_date = '{today}'
               AND r.home_score IS NULL
-              AND p.vegas_spread != 0
             ORDER BY p.game_time
         """)
 

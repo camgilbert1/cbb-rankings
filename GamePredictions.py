@@ -39,6 +39,7 @@ ESPN_TO_ODDS_MAPPING = {
     'Sacramento State Hornets': 'Sacramento St Hornets',  # State→St (fallback didn't work)
     'Hawaii Rainbow Warriors': "Hawai'i Rainbow Warriors",  # Different spelling with apostrophe
     'Cal State Fullerton Titans': 'CSU Fullerton Titans',  # "Cal State" vs "CSU"
+    'Loyola Chicago Ramblers': 'Loyola (Chi) Ramblers',  # City name vs abbreviation
     # Add more mappings as needed
 }
 
@@ -98,6 +99,7 @@ def get_vegas_spreads():
                             spreads[team] = spread
 
         print(f"✓ Fetched spreads for {len(spreads) // 2} games")
+        print(f"  Odds API teams: {sorted(spreads.keys())}")
         return spreads
 
     except Exception as e:
@@ -162,7 +164,8 @@ def get_todays_games():
 
     try:
         url = "https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard"
-        response = requests.get(url)
+        params = {'limit': 300, 'groups': 50}
+        response = requests.get(url, params=params)
         response.raise_for_status()
 
         data = response.json()
@@ -573,6 +576,11 @@ def main():
         away_team_normalized = normalize_team_name_for_odds(away_team, vegas_spreads)
         home_spread = vegas_spreads.get(home_team_normalized)
         away_spread = vegas_spreads.get(away_team_normalized)
+
+        if home_spread is None and vegas_spreads:
+            print(f"  ⚠️  No spread found for: '{home_team}' (tried: '{home_team_normalized}')")
+        if away_spread is None and vegas_spreads:
+            print(f"  ⚠️  No spread found for: '{away_team}' (tried: '{away_team_normalized}')")
 
         # Calculate features
         features = calculate_matchup_features(home_team, away_team, team_stats)
