@@ -34,6 +34,21 @@ FIRST_ROUND_MATCHUPS = [
 
 REGIONS = ['East', 'West', 'South', 'Midwest']
 
+# BracketMatrix uses different team name conventions than KenPom.
+# Add any name that fails to match here: 'BracketMatrix name' -> 'KenPom name'
+BRACKETMATRIX_TO_KENPOM = {
+    'NC-Wilmington': 'UNC Wilmington',
+    'Miami (FLA.)': 'Miami FL',
+    'Miami (Ohio)': 'Miami OH',
+    'E. Tennessee State': 'East Tennessee St.',
+    'Tennessee-Martin': 'UT Martin',
+    'Long Island': 'LIU',
+    "St. Mary's (CA)": "Saint Mary's",
+    'Stephen F. Austin': 'SFA',
+    'North Carolina State': 'NC State',
+    'Hawaii': "Hawai'i",
+}
+
 
 # =============================================================================
 # SCRAPING
@@ -282,8 +297,12 @@ def run_bracket_predictions(first_four, first_round, team_stats):
 
         print(f"  {home_team} vs {away_team}")
 
-        features = calculate_matchup_features(home_team, away_team, team_stats)
-        prediction = predict_game(home_team, away_team, features)
+        # Translate BracketMatrix names to KenPom names for stats lookup
+        home_kenpom = BRACKETMATRIX_TO_KENPOM.get(home_team, home_team)
+        away_kenpom = BRACKETMATRIX_TO_KENPOM.get(away_team, away_team)
+
+        features = calculate_matchup_features(home_kenpom, away_kenpom, team_stats)
+        prediction = predict_game(home_kenpom, away_kenpom, features)
 
         records.append({
             'round': matchup['round'],
