@@ -6,3 +6,4 @@ kenpompy
 requests
 pytz
 python-dotenv
+beautifulsoup4

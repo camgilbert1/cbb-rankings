@@ -1,7 +1,7 @@
 """
 College Basketball Rankings Dashboard
 Built with Streamlit - Powered by KenPom Data
-Updated: 2026-02-06 - Fixed timezone for cloud deployment
+Updated: 2026-02-06 - Added Bracketology tab
 """
 
 import streamlit as st
@@ -228,6 +228,81 @@ def load_performance(time_period):
         return {}
 
 
+@st.cache_data(ttl=3600)  # Cache for 1 hour (bracket updates Tues/Fri only)
+def load_bracket_predictions():
+    """Load bracket predictions from Databricks"""
+    try:
+        connection = sql.connect(
+            server_hostname=st.secrets.get("DATABRICKS_HOST", os.getenv("DATABRICKS_HOST")),
+            http_path=st.secrets.get("DATABRICKS_HTTP_PATH", os.getenv("DATABRICKS_HTTP_PATH")),
+            access_token=st.secrets.get("DATABRICKS_TOKEN", os.getenv("DATABRICKS_TOKEN"))
+        )
+
+        cursor = connection.cursor()
+        cursor.execute("""
+            SELECT
+                round,
+                region,
+                top_seed,
+                top_team,
+                low_seed,
+                low_team,
+                predicted_winner,
+                win_probability,
+                predicted_top_score,
+                predicted_low_score,
+                confidence,
+                updated_at
+            FROM workspace.default.bracket_predictions
+            ORDER BY round, region, top_seed
+        """)
+
+        df = cursor.fetchall_arrow().to_pandas()
+        cursor.close()
+        connection.close()
+
+        return df
+    except Exception as e:
+        return pd.DataFrame()
+
+
+def render_matchup_card(row):
+    """Render a styled matchup card as HTML."""
+    top_seed = row['top_seed']
+    top_team = row['top_team']
+    low_seed = row['low_seed']
+    low_team = row['low_team']
+    winner = row.get('predicted_winner', 'TBD')
+    win_prob = row.get('win_probability')
+    confidence = row.get('confidence', 'N/A')
+
+    top_winner = (winner == top_team)
+    low_winner = (winner == low_team)
+
+    top_bg = "#28a745" if top_winner else "#f8f9fa"
+    top_color = "white" if top_winner else "#212529"
+    low_bg = "#28a745" if low_winner else "#f8f9fa"
+    low_color = "white" if low_winner else "#212529"
+
+    prob_text = f"{win_prob:.0%}" if win_prob is not None else "TBD"
+    conf_emoji = {"High": "🟢", "Medium": "🟡", "Low": "🔴"}.get(confidence, "⚪")
+
+    return f"""
+    <div style="border:1px solid #dee2e6; border-radius:8px; padding:8px; margin:4px 0; font-size:13px;">
+        <div style="background:{top_bg}; color:{top_color}; padding:4px 8px; border-radius:4px; margin-bottom:2px;">
+            <b>#{top_seed}</b> {top_team}
+        </div>
+        <div style="text-align:center; color:#6c757d; font-size:11px; line-height:1.4;">vs</div>
+        <div style="background:{low_bg}; color:{low_color}; padding:4px 8px; border-radius:4px; margin-top:2px;">
+            <b>#{low_seed}</b> {low_team}
+        </div>
+        <div style="font-size:11px; color:#6c757d; margin-top:4px; text-align:right;">
+            {conf_emoji} {prob_text}
+        </div>
+    </div>
+    """
+
+
 # Load data
 with st.spinner("Loading rankings..."):
     df = load_data()
@@ -296,245 +371,284 @@ if df is not None:
             filtered_df['team_name'].str.contains(search_term, case=False, na=False)
         ]
 
-    # Stats
-    col1, col2, col3, col4 = st.columns(4)
+    # Tabs
+    tab1, tab2, tab3, tab4 = st.tabs(["📊 Rankings", "🎯 Today's Picks", "🏆 Bracketology", "📈 Performance"])
 
-    with col1:
-        st.metric("Total Teams", len(df))
-    with col2:
-        st.metric("#1 Team", df.iloc[0]['team_name'])
-    with col3:
-        st.metric("Conferences", df['conference'].nunique())
-    with col4:
-        st.metric("Showing", len(filtered_df))
+    # =========================================================================
+    # TAB 1: RANKINGS
+    # =========================================================================
+    with tab1:
+        # Stats
+        col1, col2, col3, col4 = st.columns(4)
 
-    st.markdown("---")
+        with col1:
+            st.metric("Total Teams", len(df))
+        with col2:
+            st.metric("#1 Team", df.iloc[0]['team_name'])
+        with col3:
+            st.metric("Conferences", df['conference'].nunique())
+        with col4:
+            st.metric("Showing", len(filtered_df))
 
-    # Game Predictions Section
-    if not predictions_df.empty:
-        st.subheader(f"🎯 Today's Game Predictions ({len(predictions_df)} games)")
+        st.markdown("---")
 
-        # Create compact display dataframe
-        display_predictions = predictions_df.copy()
+        st.subheader("📊 Team Rankings")
 
-        # Format matchup column
-        display_predictions['Matchup'] = display_predictions.apply(
-            lambda row: f"{row['away_team']} @ {row['home_team']}", axis=1
-        )
+        # Format the dataframe for display
+        display_df = filtered_df.copy()
+        if 'loaded_at' in display_df.columns:
+            display_df = display_df.drop('loaded_at', axis=1)
 
-        # Format game status
-        display_predictions['Status'] = display_predictions['game_status']
+        display_df.columns = [
+            "Rank", "Team", "Conference", "Eff. Margin",
+            "Off. Eff.", "Def. Eff.", "Off. Rank", "Def. Rank", "Tempo"
+        ]
 
-        # Format predicted score
-        display_predictions['Pred Score'] = display_predictions.apply(
-            lambda row: f"{row['predicted_away_score']:.0f} - {row['predicted_home_score']:.0f}", axis=1
-        )
-
-        # Format actual score (if game is final)
-        display_predictions['Actual Score'] = display_predictions.apply(
-            lambda row: (
-                f"{int(row['actual_away_score'])} - {int(row['actual_home_score'])}"
-                if pd.notna(row['actual_home_score']) and pd.notna(row['actual_away_score'])
-                else "-"
-            ),
-            axis=1
-        )
-
-        # Format winner with emoji
-        display_predictions['Prediction'] = display_predictions.apply(
-            lambda row: f"🏆 {row['predicted_winner']}", axis=1
-        )
-
-        # Calculate and show actual winner (if game is final)
-        def get_actual_winner(row):
-            if pd.notna(row['actual_home_score']) and pd.notna(row['actual_away_score']):
-                if row['actual_home_score'] > row['actual_away_score']:
-                    return f"✓ {row['home_team']}"
-                else:
-                    return f"✓ {row['away_team']}"
-            return "-"
-
-        display_predictions['Actual Winner'] = display_predictions.apply(get_actual_winner, axis=1)
-
-        # Format probability
-        display_predictions['Win %'] = display_predictions['win_probability'].apply(
-            lambda x: f"{x:.0%}"
-        )
-
-        # Format Vegas spread - show favored team with full name
-        display_predictions['Spread'] = display_predictions.apply(
-            lambda row: (
-                f"{row['home_team']} {row['vegas_spread']:.1f}" if row['vegas_spread'] < 0
-                else f"{row['away_team']} -{row['vegas_spread']:.1f}" if row['vegas_spread'] > 0
-                else "N/A"
-            ),
-            axis=1
-        )
-
-        # Add confidence emoji
-        confidence_emoji = {"High": "🟢", "Medium": "🟡", "Low": "🔴", "N/A": "⚪"}
-        display_predictions['Win Conf.'] = display_predictions['confidence'].apply(
-            lambda x: f"{confidence_emoji.get(x, '⚪')} {x}"
-        )
-
-        # Add ATS pick with confidence
-        display_predictions['ATS Pick'] = display_predictions['cover_pick']
-
-        display_predictions['ATS Conf.'] = display_predictions['cover_confidence'].apply(
-            lambda x: f"{confidence_emoji.get(x, '⚪')} {x}"
-        )
-
-        # Calculate actual ATS result (if game is final)
-        def get_ats_result(row):
-            # Check if game is finished
-            if pd.notna(row['actual_home_score']) and pd.notna(row['actual_away_score']):
-                # Check if spread was available
-                if row['vegas_spread'] == 0:
-                    return "No spread"
-
-                actual_margin = row['actual_home_score'] - row['actual_away_score']
-                actual_adjusted = actual_margin + row['vegas_spread']
-
-                if actual_adjusted > 0:
-                    # Home team covered
-                    return f"✓ {row['home_team']} covered"
-                elif actual_adjusted < 0:
-                    # Away team covered
-                    return f"✓ {row['away_team']} covered"
-                else:
-                    return "Push"
-            return "-"
-
-        display_predictions['Actual ATS'] = display_predictions.apply(get_ats_result, axis=1)
-
-        # Sort by ATS confidence (High -> Medium -> Low)
-        confidence_order = {'High': 0, 'Medium': 1, 'Low': 2}
-        display_predictions['conf_sort'] = display_predictions['cover_confidence'].map(confidence_order)
-        display_predictions = display_predictions.sort_values('conf_sort')
-
-        # Select and display columns
-        compact_df = display_predictions[[
-            'Matchup', 'Status', 'Spread', 'Prediction', 'Pred Score', 'ATS Pick', 'ATS Conf.',
-            'Actual Score', 'Actual Winner', 'Win %', 'Win Conf.', 'Actual ATS'
-        ]]
+        # Round numeric columns
+        numeric_cols = ["Eff. Margin", "Off. Eff.", "Def. Eff.", "Tempo"]
+        for col in numeric_cols:
+            display_df[col] = display_df[col].round(1)
 
         st.dataframe(
-            compact_df,
+            display_df,
             use_container_width=True,
             hide_index=True,
-            height=min(400, len(compact_df) * 35 + 38)  # Dynamic height based on number of games
+            height=600
         )
 
-    # Main rankings table
-    st.subheader("📊 Team Rankings")
+        # Download button
+        csv = display_df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Download Rankings (CSV)",
+            data=csv,
+            file_name="cbb_rankings.csv",
+            mime="text/csv"
+        )
 
-    # Format the dataframe for display
-    display_df = filtered_df.copy()
-    # Drop loaded_at column before display
-    if 'loaded_at' in display_df.columns:
-        display_df = display_df.drop('loaded_at', axis=1)
+    # =========================================================================
+    # TAB 2: TODAY'S PICKS
+    # =========================================================================
+    with tab2:
+        if not predictions_df.empty:
+            st.subheader(f"🎯 Today's Game Predictions ({len(predictions_df)} games)")
 
-    display_df.columns = [
-        "Rank", "Team", "Conference", "Eff. Margin",
-        "Off. Eff.", "Def. Eff.", "Off. Rank", "Def. Rank", "Tempo"
-    ]
+            # Create compact display dataframe
+            display_predictions = predictions_df.copy()
 
-    # Round numeric columns
-    numeric_cols = ["Eff. Margin", "Off. Eff.", "Def. Eff.", "Tempo"]
-    for col in numeric_cols:
-        display_df[col] = display_df[col].round(1)
+            # Format matchup column
+            display_predictions['Matchup'] = display_predictions.apply(
+                lambda row: f"{row['away_team']} @ {row['home_team']}", axis=1
+            )
 
-    # Display table
-    st.dataframe(
-        display_df,
-        use_container_width=True,
-        hide_index=True,
-        height=600
-    )
+            # Format game status
+            display_predictions['Status'] = display_predictions['game_status']
 
-    # Download button
-    csv = display_df.to_csv(index=False).encode('utf-8')
-    st.download_button(
-        label="📥 Download Rankings (CSV)",
-        data=csv,
-        file_name="cbb_rankings.csv",
-        mime="text/csv"
-    )
+            # Format predicted score
+            display_predictions['Pred Score'] = display_predictions.apply(
+                lambda row: f"{row['predicted_away_score']:.0f} - {row['predicted_home_score']:.0f}", axis=1
+            )
 
-    # Prediction Performance Tracker
-    st.markdown("---")
-    st.subheader("📈 Prediction Performance")
+            # Format actual score (if game is final)
+            display_predictions['Actual Score'] = display_predictions.apply(
+                lambda row: (
+                    f"{int(row['actual_away_score'])} - {int(row['actual_home_score'])}"
+                    if pd.notna(row['actual_home_score']) and pd.notna(row['actual_away_score'])
+                    else "-"
+                ),
+                axis=1
+            )
 
-    # Time period selector
-    time_period = st.selectbox(
-        "Time Period",
-        ["Today", "Yesterday", "Last 7 Days", "Last 30 Days", "All Time"],
-        index=4  # Default to "All Time"
-    )
+            # Format winner with emoji
+            display_predictions['Prediction'] = display_predictions.apply(
+                lambda row: f"🏆 {row['predicted_winner']}", axis=1
+            )
 
-    # Load performance data
-    performance = load_performance(time_period)
+            # Calculate and show actual winner (if game is final)
+            def get_actual_winner(row):
+                if pd.notna(row['actual_home_score']) and pd.notna(row['actual_away_score']):
+                    if row['actual_home_score'] > row['actual_away_score']:
+                        return f"✓ {row['home_team']}"
+                    else:
+                        return f"✓ {row['away_team']}"
+                return "-"
 
-    if performance:
-        # Display performance by confidence level
-        col1, col2, col3 = st.columns(3)
+            display_predictions['Actual Winner'] = display_predictions.apply(get_actual_winner, axis=1)
 
-        # High Confidence
-        with col1:
-            if 'High' in performance:
-                p = performance['High']
-                su_pct = (p['su_wins'] / p['total'] * 100) if p['total'] > 0 else 0
-                ats_pct = (p['ats_wins'] / p['total'] * 100) if p['total'] > 0 else 0
-                st.metric(
-                    "🟢 High Confidence",
-                    f"{p['total']} games",
-                    delta=None
-                )
-                st.write(f"**SU:** {p['su_wins']}-{p['su_losses']} ({su_pct:.0f}%)")
-                st.write(f"**ATS:** {p['ats_wins']}-{p['ats_losses']} ({ats_pct:.0f}%)")
-            else:
-                st.metric("🟢 High Confidence", "0-0")
-                st.write("**SU:** 0-0 (0%)")
-                st.write("**ATS:** 0-0 (0%)")
+            # Format probability
+            display_predictions['Win %'] = display_predictions['win_probability'].apply(
+                lambda x: f"{x:.0%}"
+            )
 
-        # Medium Confidence
-        with col2:
-            if 'Medium' in performance:
-                p = performance['Medium']
-                su_pct = (p['su_wins'] / p['total'] * 100) if p['total'] > 0 else 0
-                ats_pct = (p['ats_wins'] / p['total'] * 100) if p['total'] > 0 else 0
-                st.metric(
-                    "🟡 Medium Confidence",
-                    f"{p['total']} games",
-                    delta=None
-                )
-                st.write(f"**SU:** {p['su_wins']}-{p['su_losses']} ({su_pct:.0f}%)")
-                st.write(f"**ATS:** {p['ats_wins']}-{p['ats_losses']} ({ats_pct:.0f}%)")
-            else:
-                st.metric("🟡 Medium Confidence", "0-0")
-                st.write("**SU:** 0-0 (0%)")
-                st.write("**ATS:** 0-0 (0%)")
+            # Format Vegas spread - show favored team with full name
+            display_predictions['Spread'] = display_predictions.apply(
+                lambda row: (
+                    f"{row['home_team']} {row['vegas_spread']:.1f}" if row['vegas_spread'] < 0
+                    else f"{row['away_team']} -{row['vegas_spread']:.1f}" if row['vegas_spread'] > 0
+                    else "N/A"
+                ),
+                axis=1
+            )
 
-        # Low Confidence
-        with col3:
-            if 'Low' in performance:
-                p = performance['Low']
-                su_pct = (p['su_wins'] / p['total'] * 100) if p['total'] > 0 else 0
-                ats_pct = (p['ats_wins'] / p['total'] * 100) if p['total'] > 0 else 0
-                st.metric(
-                    "🔴 Low Confidence",
-                    f"{p['total']} games",
-                    delta=None
-                )
-                st.write(f"**SU:** {p['su_wins']}-{p['su_losses']} ({su_pct:.0f}%)")
-                st.write(f"**ATS:** {p['ats_wins']}-{p['ats_losses']} ({ats_pct:.0f}%)")
-            else:
-                st.metric("🔴 Low Confidence", "0-0")
-                st.write("**SU:** 0-0 (0%)")
-                st.write("**ATS:** 0-0 (0%)")
+            # Add confidence emoji
+            confidence_emoji = {"High": "🟢", "Medium": "🟡", "Low": "🔴", "N/A": "⚪"}
+            display_predictions['Win Conf.'] = display_predictions['confidence'].apply(
+                lambda x: f"{confidence_emoji.get(x, '⚪')} {x}"
+            )
 
-        # Overall stats
+            # Add ATS pick with confidence
+            display_predictions['ATS Pick'] = display_predictions['cover_pick']
+
+            display_predictions['ATS Conf.'] = display_predictions['cover_confidence'].apply(
+                lambda x: f"{confidence_emoji.get(x, '⚪')} {x}"
+            )
+
+            # Calculate actual ATS result (if game is final)
+            def get_ats_result(row):
+                if pd.notna(row['actual_home_score']) and pd.notna(row['actual_away_score']):
+                    if row['vegas_spread'] == 0:
+                        return "No spread"
+
+                    actual_margin = row['actual_home_score'] - row['actual_away_score']
+                    actual_adjusted = actual_margin + row['vegas_spread']
+
+                    if actual_adjusted > 0:
+                        return f"✓ {row['home_team']} covered"
+                    elif actual_adjusted < 0:
+                        return f"✓ {row['away_team']} covered"
+                    else:
+                        return "Push"
+                return "-"
+
+            display_predictions['Actual ATS'] = display_predictions.apply(get_ats_result, axis=1)
+
+            # Sort by ATS confidence (High -> Medium -> Low)
+            confidence_order = {'High': 0, 'Medium': 1, 'Low': 2}
+            display_predictions['conf_sort'] = display_predictions['cover_confidence'].map(confidence_order)
+            display_predictions = display_predictions.sort_values('conf_sort')
+
+            # Select and display columns
+            compact_df = display_predictions[[
+                'Matchup', 'Status', 'Spread', 'Prediction', 'Pred Score', 'ATS Pick', 'ATS Conf.',
+                'Actual Score', 'Actual Winner', 'Win %', 'Win Conf.', 'Actual ATS'
+            ]]
+
+            st.dataframe(
+                compact_df,
+                use_container_width=True,
+                hide_index=True,
+                height=min(400, len(compact_df) * 35 + 38)
+            )
+        else:
+            st.info("No predictions available for today yet. Check back after the daily predictions run.")
+
+    # =========================================================================
+    # TAB 3: BRACKETOLOGY
+    # =========================================================================
+    with tab3:
+        st.subheader("🏀 NCAA Tournament Bracket Predictions")
+        st.markdown("*Predictions generated using KenPom efficiency metrics. Bracket updated every Tuesday & Friday.*")
+
+        with st.spinner("Loading bracket predictions..."):
+            bracket_df = load_bracket_predictions()
+
+        if bracket_df.empty:
+            st.info("No bracket predictions available yet. Run BracketPredictions.py to populate.")
+        else:
+            # Show last updated
+            if 'updated_at' in bracket_df.columns and len(bracket_df) > 0:
+                last_updated = str(bracket_df['updated_at'].iloc[0])[:10]
+                st.caption(f"Bracket last updated: {last_updated}")
+
+            # ---- First Four ----
+            first_four = bracket_df[bracket_df['round'] == 'First Four']
+            if not first_four.empty:
+                st.markdown("### First Four")
+                ff_cols = st.columns(4)
+                for i, (_, matchup) in enumerate(first_four.iterrows()):
+                    with ff_cols[i % 4]:
+                        st.markdown(render_matchup_card(matchup), unsafe_allow_html=True)
+                        st.caption(matchup['region'])
+
+                st.markdown("---")
+
+            # ---- First Round by Region ----
+            first_round = bracket_df[bracket_df['round'] == 'First Round']
+
+            if not first_round.empty:
+                st.markdown("### First Round")
+                regions = ['East', 'West', 'South', 'Midwest']
+                region_cols = st.columns(4)
+
+                for i, region in enumerate(regions):
+                    with region_cols[i]:
+                        st.markdown(f"**{region}**")
+                        region_matchups = first_round[first_round['region'] == region].sort_values('top_seed')
+                        for _, matchup in region_matchups.iterrows():
+                            st.markdown(render_matchup_card(matchup), unsafe_allow_html=True)
+
+    # =========================================================================
+    # TAB 4: PERFORMANCE
+    # =========================================================================
+    with tab4:
+        st.subheader("📈 Prediction Performance")
+
+        # Time period selector
+        time_period = st.selectbox(
+            "Time Period",
+            ["Today", "Yesterday", "Last 7 Days", "Last 30 Days", "All Time"],
+            index=4  # Default to "All Time"
+        )
+
+        # Load performance data
+        performance = load_performance(time_period)
+
         if performance:
+            # Display performance by confidence level
+            col1, col2, col3 = st.columns(3)
+
+            # High Confidence
+            with col1:
+                if 'High' in performance:
+                    p = performance['High']
+                    su_pct = (p['su_wins'] / p['total'] * 100) if p['total'] > 0 else 0
+                    ats_pct = (p['ats_wins'] / p['total'] * 100) if p['total'] > 0 else 0
+                    st.metric("🟢 High Confidence", f"{p['total']} games")
+                    st.write(f"**SU:** {p['su_wins']}-{p['su_losses']} ({su_pct:.0f}%)")
+                    st.write(f"**ATS:** {p['ats_wins']}-{p['ats_losses']} ({ats_pct:.0f}%)")
+                else:
+                    st.metric("🟢 High Confidence", "0-0")
+                    st.write("**SU:** 0-0 (0%)")
+                    st.write("**ATS:** 0-0 (0%)")
+
+            # Medium Confidence
+            with col2:
+                if 'Medium' in performance:
+                    p = performance['Medium']
+                    su_pct = (p['su_wins'] / p['total'] * 100) if p['total'] > 0 else 0
+                    ats_pct = (p['ats_wins'] / p['total'] * 100) if p['total'] > 0 else 0
+                    st.metric("🟡 Medium Confidence", f"{p['total']} games")
+                    st.write(f"**SU:** {p['su_wins']}-{p['su_losses']} ({su_pct:.0f}%)")
+                    st.write(f"**ATS:** {p['ats_wins']}-{p['ats_losses']} ({ats_pct:.0f}%)")
+                else:
+                    st.metric("🟡 Medium Confidence", "0-0")
+                    st.write("**SU:** 0-0 (0%)")
+                    st.write("**ATS:** 0-0 (0%)")
+
+            # Low Confidence
+            with col3:
+                if 'Low' in performance:
+                    p = performance['Low']
+                    su_pct = (p['su_wins'] / p['total'] * 100) if p['total'] > 0 else 0
+                    ats_pct = (p['ats_wins'] / p['total'] * 100) if p['total'] > 0 else 0
+                    st.metric("🔴 Low Confidence", f"{p['total']} games")
+                    st.write(f"**SU:** {p['su_wins']}-{p['su_losses']} ({su_pct:.0f}%)")
+                    st.write(f"**ATS:** {p['ats_wins']}-{p['ats_losses']} ({ats_pct:.0f}%)")
+                else:
+                    st.metric("🔴 Low Confidence", "0-0")
+                    st.write("**SU:** 0-0 (0%)")
+                    st.write("**ATS:** 0-0 (0%)")
+
+            # Overall stats
             total_games = sum(p['total'] for p in performance.values())
             total_su_wins = sum(p['su_wins'] for p in performance.values())
             total_su_losses = sum(p['su_losses'] for p in performance.values())
@@ -550,8 +664,8 @@ if df is not None:
                 with col2:
                     ats_pct = (total_ats_wins / total_games * 100) if total_games > 0 else 0
                     st.metric("Overall Against The Spread", f"{total_ats_wins}-{total_ats_losses} ({ats_pct:.1f}%)")
-    else:
-        st.info("No completed games with predictions yet. Performance tracking will begin after games are played!")
+        else:
+            st.info("No completed games with predictions yet. Performance tracking will begin after games are played!")
 
     # Footer
     st.markdown("---")
