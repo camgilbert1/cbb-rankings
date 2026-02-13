@@ -284,8 +284,17 @@ def render_matchup_card(row):
     low_bg = "#28a745" if low_winner else "#f8f9fa"
     low_color = "white" if low_winner else "#212529"
 
+    top_score = row.get('predicted_top_score')
+    low_score = row.get('predicted_low_score')
+
     prob_text = f"{win_prob:.0%}" if win_prob is not None else "TBD"
     conf_emoji = {"High": "🟢", "Medium": "🟡", "Low": "🔴"}.get(confidence, "⚪")
+
+    # Score display: show predicted score if available
+    if top_score is not None and low_score is not None:
+        score_html = f'<div style="text-align:center; font-size:12px; color:#495057; margin-top:4px; font-weight:600;">{top_score:.0f} – {low_score:.0f}</div>'
+    else:
+        score_html = ''
 
     return f"""
     <div style="border:1px solid #dee2e6; border-radius:8px; padding:8px; margin:4px 0; font-size:13px;">
@@ -296,7 +305,8 @@ def render_matchup_card(row):
         <div style="background:{low_bg}; color:{low_color}; padding:4px 8px; border-radius:4px; margin-top:2px;">
             <b>#{low_seed}</b> {low_team}
         </div>
-        <div style="font-size:11px; color:#6c757d; margin-top:4px; text-align:right;">
+        {score_html}
+        <div style="font-size:11px; color:#6c757d; margin-top:2px; text-align:right;">
             {conf_emoji} {prob_text}
         </div>
     </div>
