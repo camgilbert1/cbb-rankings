@@ -44,9 +44,8 @@ BRACKETMATRIX_TO_KENPOM = {
     'Tennessee-Martin': 'UT Martin',
     'Long Island': 'LIU',
     "St. Mary's (CA)": "Saint Mary's",
-    'Stephen F. Austin': 'SFA',
     'North Carolina State': 'NC State',
-    'Hawaii': "Hawai'i",
+    'Bethune-Cookman': 'Bethune Cookman',
 }
 
 
