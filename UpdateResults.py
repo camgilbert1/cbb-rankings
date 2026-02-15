@@ -155,13 +155,15 @@ def main():
     print("COLLEGE BASKETBALL GAME RESULTS UPDATE")
     print("="*80)
 
-    # Check both today and yesterday for completed games
+    # Check the last 3 days for completed games
+    # This ensures we catch results even if a prior run was missed or incomplete
     today = datetime.now()
-    yesterday = today - timedelta(days=1)
 
     dates_to_check = [
         (today, "Today"),
-        (yesterday, "Yesterday")
+        (today - timedelta(days=1), "Yesterday"),
+        (today - timedelta(days=2), "2 Days Ago"),
+        (today - timedelta(days=3), "3 Days Ago"),
     ]
 
     all_results = []
