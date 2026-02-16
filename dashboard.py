@@ -23,7 +23,7 @@ st.title("🏀 College Basketball Rankings Dashboard")
 st.markdown("*Powered by KenPom efficiency metrics*")
 
 # Database connection
-@st.cache_data(ttl=600)  # Cache for 10 minutes
+@st.cache_data(ttl=21600)  # Cache for 6 hours (data only updates at 6 AM)
 def load_data():
     """Load rankings from Databricks Gold table"""
     try:
@@ -61,7 +61,7 @@ def load_data():
         return None
 
 
-@st.cache_data(ttl=600)  # Cache for 10 minutes
+@st.cache_data(ttl=21600)  # Cache for 6 hours (data only updates at 6 AM)
 def load_predictions():
     """Load today's game predictions from Databricks with actual results"""
     try:
@@ -114,7 +114,7 @@ def load_predictions():
         return pd.DataFrame()
 
 
-@st.cache_data(ttl=600)  # Cache for 10 minutes
+@st.cache_data(ttl=21600)  # Cache for 6 hours (data only updates at 6 AM)
 def load_performance(time_period):
     """Load prediction performance metrics from Databricks
 
