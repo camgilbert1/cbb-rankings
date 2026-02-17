@@ -40,6 +40,7 @@ ESPN_TO_ODDS_MAPPING = {
     'Hawaii Rainbow Warriors': "Hawai'i Rainbow Warriors",  # Different spelling with apostrophe
     'Cal State Fullerton Titans': 'CSU Fullerton Titans',  # "Cal State" vs "CSU"
     'Loyola Chicago Ramblers': 'Loyola (Chi) Ramblers',  # City name vs abbreviation
+    'UT Martin Skyhawks': 'Tenn-Martin Skyhawks',  # Completely different abbreviation
     # Add more mappings as needed
 }
 
