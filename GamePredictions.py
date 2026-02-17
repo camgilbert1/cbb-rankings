@@ -252,6 +252,22 @@ def find_team_match(espn_name, team_stats):
     Returns:
         str: Matched team name or None
     """
+    # Full school name mappings (ESPN school name without mascot -> KenPom name)
+    # Used for names that can't be resolved by first-word or substring matching
+    full_name_mappings = {
+        'UT Martin': 'Tennessee Martin',
+        'Southeast Missouri State': 'Southeast Missouri St',
+        'SIU Edwardsville': 'SIU Edwardsville',
+    }
+
+    # Check full school name mapping first
+    words = espn_name.split()
+    school_name = ' '.join(words[:-1]) if len(words) > 1 else espn_name
+    if school_name in full_name_mappings:
+        mapped = full_name_mappings[school_name]
+        if mapped in team_stats['team_name'].values:
+            return mapped
+
     # Common abbreviation mappings (ESPN first word -> KenPom name)
     name_mappings = {
         'UConn': 'Connecticut',
@@ -271,11 +287,6 @@ def find_team_match(espn_name, team_stats):
     # First try exact match
     if espn_name in team_stats['team_name'].values:
         return espn_name
-
-    # Strip mascot (last word) to get school name
-    # e.g., "Charleston Southern Buccaneers" -> "Charleston Southern"
-    words = espn_name.split()
-    school_name = ' '.join(words[:-1]) if len(words) > 1 else espn_name
 
     # Try school name (without mascot) as exact match
     if school_name in team_stats['team_name'].values:
