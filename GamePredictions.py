@@ -252,7 +252,7 @@ def find_team_match(espn_name, team_stats):
     Returns:
         str: Matched team name or None
     """
-    # Common abbreviation mappings
+    # Common abbreviation mappings (ESPN first word -> KenPom name)
     name_mappings = {
         'UConn': 'Connecticut',
         'UNLV': 'Nevada-Las Vegas',
@@ -272,9 +272,25 @@ def find_team_match(espn_name, team_stats):
     if espn_name in team_stats['team_name'].values:
         return espn_name
 
+    # Strip mascot (last word) to get school name
+    # e.g., "Charleston Southern Buccaneers" -> "Charleston Southern"
+    words = espn_name.split()
+    school_name = ' '.join(words[:-1]) if len(words) > 1 else espn_name
+
+    # Try school name (without mascot) as exact match
+    if school_name in team_stats['team_name'].values:
+        return school_name
+
+    # Try with hyphens replaced by spaces (ESPN uses hyphens, KenPom often uses spaces)
+    # e.g., "Gardner-Webb" -> "Gardner Webb"
+    school_name_no_hyphen = school_name.replace('-', ' ')
+    if school_name_no_hyphen != school_name:
+        if school_name_no_hyphen in team_stats['team_name'].values:
+            return school_name_no_hyphen
+
     # Try mapping common abbreviations
-    first_word = espn_name.split()[0]
-    search_term = first_word  # Default search term
+    first_word = words[0]
+    search_term = first_word
 
     if first_word in name_mappings:
         search_term = name_mappings[first_word]
@@ -285,12 +301,30 @@ def find_team_match(espn_name, team_stats):
     if len(matches) == 1:
         return matches.iloc[0]['team_name']
     elif len(matches) > 1:
-        # If multiple matches, try exact word boundary match
+        # Multiple matches — try to find the best one using school name
+        # e.g., for "Charleston Southern", prefer "Charleston Southern" over "Charleston"
+        for team_name in matches['team_name']:
+            if team_name.lower() == school_name.lower() or team_name.lower() == school_name_no_hyphen.lower():
+                return team_name
+        # Try if school name is contained in KenPom name or vice versa
+        for team_name in matches['team_name']:
+            if school_name.lower() in team_name.lower() or team_name.lower() in school_name.lower():
+                return team_name
+        # Try exact word boundary match on first word
         for team_name in matches['team_name']:
             if search_term.lower() in team_name.lower().split():
                 return team_name
         # If no exact word match, return first match
         return matches.iloc[0]['team_name']
+
+    # Try with hyphen replaced by space in search
+    if '-' in search_term:
+        search_no_hyphen = search_term.replace('-', ' ')
+        matches = team_stats[team_stats['team_name'].str.contains(search_no_hyphen, case=False, na=False)]
+        if len(matches) == 1:
+            return matches.iloc[0]['team_name']
+        elif len(matches) > 1:
+            return matches.iloc[0]['team_name']
 
     # Try checking if KenPom name is contained in ESPN name (as fallback)
     for team_name in team_stats['team_name']:
