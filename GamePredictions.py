@@ -41,6 +41,7 @@ ESPN_TO_ODDS_MAPPING = {
     'Cal State Fullerton Titans': 'CSU Fullerton Titans',  # "Cal State" vs "CSU"
     'Loyola Chicago Ramblers': 'Loyola (Chi) Ramblers',  # City name vs abbreviation
     'UT Martin Skyhawks': 'Tenn-Martin Skyhawks',  # Completely different abbreviation
+    'Seattle U Redhawks': 'Seattle Redhawks',  # Drops "U"
     # Add more mappings as needed
 }
 
@@ -310,9 +311,9 @@ def find_team_match(espn_name, team_stats):
         'Nicholls State': 'Nicholls St',
         'McNeese State': 'McNeese St',
         'Northwestern State': 'Northwestern St',
-        "Saint Joseph's": "Saint Joseph's",
-        "Saint Mary's": "Saint Mary's",
-        "St. John's": "St. John's",
+        "Saint Joseph's": "Saint Joseph",
+        "Saint Mary's": "Saint Mary",
+        "St. John's": "St. John",
     }
 
     # Check full school name mapping first
@@ -336,6 +337,10 @@ def find_team_match(espn_name, team_stats):
         # Also try with trailing period (KenPom sometimes uses "St." vs "St")
         if mapped + '.' in team_stats['team_name'].values:
             return mapped + '.'
+        # Try contains match for apostrophe/encoding differences (e.g., ' vs ')
+        contains = team_stats[team_stats['team_name'].str.contains(mapped, case=False, na=False)]
+        if len(contains) == 1:
+            return contains.iloc[0]['team_name']
 
     # Common abbreviation mappings (ESPN first word -> KenPom name)
     name_mappings = {
