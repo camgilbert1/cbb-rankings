@@ -262,13 +262,75 @@ def find_team_match(espn_name, team_stats):
         'UL Monroe': 'Louisiana Monroe',
         'Ole Miss': 'Mississippi',
         'Utah State': 'Utah St',
+        'Washington State': 'Washington St',
+        'Mississippi State': 'Mississippi St',
+        'Illinois State': 'Illinois St',
+        'Missouri State': 'Missouri St',
+        'Jacksonville State': 'Jacksonville St',
+        'Loyola Maryland': 'Loyola MD',
+        'Colorado State': 'Colorado St',
+        'Indiana State': 'Indiana St',
+        'Oklahoma State': 'Oklahoma St',
+        'South Dakota State': 'South Dakota St',
+        'North Dakota State': 'North Dakota St',
+        'Kansas State': 'Kansas St',
+        'Michigan State': 'Michigan St',
+        'Oregon State': 'Oregon St',
+        'Penn State': 'Penn St',
+        'Iowa State': 'Iowa St',
+        'Ohio State': 'Ohio St',
+        'Arizona State': 'Arizona St',
+        'Fresno State': 'Fresno St',
+        'Boise State': 'Boise St',
+        'Wichita State': 'Wichita St',
+        'San Diego State': 'San Diego St',
+        'San Jose State': 'San Jose St',
+        'Appalachian State': 'Appalachian St',
+        'Georgia State': 'Georgia St',
+        'Ball State': 'Ball St',
+        'Kent State': 'Kent St',
+        'Wright State': 'Wright St',
+        'Youngstown State': 'Youngstown St',
+        'Norfolk State': 'Norfolk St',
+        'Coppin State': 'Coppin St',
+        'Morgan State': 'Morgan St',
+        'Alcorn State': 'Alcorn St',
+        'Grambling State': 'Grambling St',
+        'Texas State': 'Texas St',
+        'Arkansas State': 'Arkansas St',
+        'Cleveland State': 'Cleveland St',
+        'Portland State': 'Portland St',
+        'Weber State': 'Weber St',
+        'Idaho State': 'Idaho St',
+        'Montana State': 'Montana St',
+        'Kennesaw State': 'Kennesaw St',
+        'Murray State': 'Murray St',
+        'Towson State': 'Towson St',
+        'Valdosta State': 'Valdosta St',
+        'Nicholls State': 'Nicholls St',
+        'McNeese State': 'McNeese St',
+        'Northwestern State': 'Northwestern St',
+        "Saint Joseph's": "Saint Joseph's",
+        "Saint Mary's": "Saint Mary's",
+        "St. John's": "St. John's",
     }
 
     # Check full school name mapping first
     words = espn_name.split()
     school_name = ' '.join(words[:-1]) if len(words) > 1 else espn_name
+
+    # Try exact match, then prefix match for multi-word mascots (e.g., "Red Storm")
+    mapped = None
     if school_name in full_name_mappings:
         mapped = full_name_mappings[school_name]
+    else:
+        # Prefix match — check longest keys first to prefer "Mississippi State" over "Mississippi"
+        for key in sorted(full_name_mappings.keys(), key=len, reverse=True):
+            if school_name.startswith(key):
+                mapped = full_name_mappings[key]
+                break
+
+    if mapped:
         if mapped in team_stats['team_name'].values:
             return mapped
         # Also try with trailing period (KenPom sometimes uses "St." vs "St")
@@ -289,6 +351,7 @@ def find_team_match(espn_name, team_stats):
         'UTEP': 'Texas-El Paso',
         'UTSA': 'Texas-San Antonio',
         'UAB': 'Alabama-Birmingham',
+        'UIC': 'Illinois Chicago',
     }
 
     # First try exact match
