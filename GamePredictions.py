@@ -259,6 +259,7 @@ def find_team_match(espn_name, team_stats):
         'UT Martin': 'Tennessee Martin',
         'Southeast Missouri State': 'Southeast Missouri St',
         'SIU Edwardsville': 'SIU Edwardsville',
+        'UL Monroe': 'Louisiana Monroe',
     }
 
     # Check full school name mapping first
