@@ -261,6 +261,7 @@ def find_team_match(espn_name, team_stats):
         'SIU Edwardsville': 'SIU Edwardsville',
         'UL Monroe': 'Louisiana Monroe',
         'Ole Miss': 'Mississippi',
+        'Utah State': 'Utah St',
     }
 
     # Check full school name mapping first
@@ -270,6 +271,9 @@ def find_team_match(espn_name, team_stats):
         mapped = full_name_mappings[school_name]
         if mapped in team_stats['team_name'].values:
             return mapped
+        # Also try with trailing period (KenPom sometimes uses "St." vs "St")
+        if mapped + '.' in team_stats['team_name'].values:
+            return mapped + '.'
 
     # Common abbreviation mappings (ESPN first word -> KenPom name)
     name_mappings = {
@@ -369,6 +373,11 @@ def calculate_matchup_features(home_team, away_team, team_stats):
     # Match ESPN team names to KenPom team names
     home_match = find_team_match(home_team, team_stats)
     away_match = find_team_match(away_team, team_stats)
+
+    if home_match and home_match != home_team:
+        print(f"  📎 {home_team} → KenPom: '{home_match}'")
+    if away_match and away_match != away_team:
+        print(f"  📎 {away_team} → KenPom: '{away_match}'")
 
     if not home_match or not away_match:
         print(f"  ⚠️  Could not find stats for {home_team if not home_match else away_team}")
