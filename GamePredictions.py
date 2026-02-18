@@ -321,9 +321,15 @@ def find_team_match(espn_name, team_stats):
             if team_name.lower() == school_name.lower() or team_name.lower() == school_name_no_hyphen.lower():
                 return team_name
         # Try if school name is contained in KenPom name or vice versa
+        # Sort by longest match first to prefer specific matches
+        # e.g., "Indiana St" over "Indiana" when searching for "Indiana State"
+        containment_matches = []
         for team_name in matches['team_name']:
             if school_name.lower() in team_name.lower() or team_name.lower() in school_name.lower():
-                return team_name
+                containment_matches.append(team_name)
+        if containment_matches:
+            # Return the longest (most specific) match
+            return max(containment_matches, key=len)
         # Try exact word boundary match on first word
         for team_name in matches['team_name']:
             if search_term.lower() in team_name.lower().split():
