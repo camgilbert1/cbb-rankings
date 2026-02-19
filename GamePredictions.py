@@ -42,6 +42,13 @@ ESPN_TO_ODDS_MAPPING = {
     'Loyola Chicago Ramblers': 'Loyola (Chi) Ramblers',  # City name vs abbreviation
     'UT Martin Skyhawks': 'Tenn-Martin Skyhawks',  # Completely different abbreviation
     'Seattle U Redhawks': 'Seattle Redhawks',  # Drops "U"
+    'Cal State Northridge Matadors': 'CSU Northridge Matadors',  # "Cal State" vs "CSU"
+    'Mississippi Valley State Delta Devils': 'Miss Valley St Delta Devils',  # Abbreviated
+    'Prairie View A&M Panthers': 'Prairie View Panthers',  # Drops "A&M"
+    'UT Arlington Mavericks': 'UT-Arlington Mavericks',  # Space vs hyphen
+    'California Baptist Lancers': 'Cal Baptist Lancers',  # "California" vs "Cal"
+    'Little Rock Trojans': 'Arkansas-Little Rock Trojans',  # Missing "Arkansas-" prefix
+    'Kansas City Roos': 'UMKC Kangaroos',  # Completely different name and mascot
     # Add more mappings as needed
 }
 
@@ -314,6 +321,16 @@ def find_team_match(espn_name, team_stats):
         "Saint Joseph's": "Saint Joseph",
         "Saint Mary's": "Saint Mary",
         "St. John's": "St. John",
+        "Hawai'i": "Hawaii",
+        'South Carolina Upstate': 'USC Upstate',
+        'Florida International': 'FIU',
+        'Alabama State': 'Alabama St',
+        'Mississippi Valley State': 'Mississippi Val',
+        'Tennessee State': 'Tennessee St',
+        'California Baptist': 'Cal Baptist',
+        'Cal State Fullerton': 'Cal St. Fullerton',
+        'Cal State Bakersfield': 'Cal St. Bakersfield',
+        'Cal State Northridge': 'Cal St. Northridge',
     }
 
     # Check full school name mapping first
