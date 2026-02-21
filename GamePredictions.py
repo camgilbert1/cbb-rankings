@@ -169,11 +169,14 @@ def get_todays_games():
     Returns:
         pd.DataFrame: Today's scheduled games
     """
-    print("Fetching today's games from ESPN...")
+    # Use Eastern Time for date to match college basketball schedule
+    eastern = pytz.timezone('US/Eastern')
+    today_eastern = datetime.now(eastern).strftime('%Y%m%d')
+    print(f"Fetching games from ESPN for {today_eastern}...")
 
     try:
         url = "https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard"
-        params = {'limit': 300, 'groups': 50}
+        params = {'dates': today_eastern, 'limit': 300, 'groups': 50}
         response = requests.get(url, params=params)
         response.raise_for_status()
 
