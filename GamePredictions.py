@@ -49,6 +49,8 @@ ESPN_TO_ODDS_MAPPING = {
     'California Baptist Lancers': 'Cal Baptist Lancers',  # "California" vs "Cal"
     'Little Rock Trojans': 'Arkansas-Little Rock Trojans',  # Missing "Arkansas-" prefix
     'Kansas City Roos': 'UMKC Kangaroos',  # Completely different name and mascot
+    'Grand Canyon Lopes': 'Grand Canyon Antelopes',  # Different mascot name
+    'Texas A&M-Corpus Christi Islanders': 'Texas A&M-CC Islanders',  # Abbreviated
     # Add more mappings as needed
 }
 
@@ -334,6 +336,13 @@ def find_team_match(espn_name, team_stats):
         'Cal State Fullerton': 'Cal St. Fullerton',
         'Cal State Bakersfield': 'Cal St. Bakersfield',
         'Cal State Northridge': 'Cal St. Northridge',
+        'Florida State': 'Florida St',
+        'Chicago State': 'Chicago St',
+        'South Carolina State': 'South Carolina St',
+        'San José State': 'San Jose St',
+        'SE Louisiana': 'Southeastern Louisiana',
+        'New Mexico State': 'New Mexico St',
+        'Texas A&M-Corpus Christi': 'Texas A&M Corpus Chris',
     }
 
     # Check full school name mapping first
