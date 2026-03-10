@@ -26,6 +26,7 @@ jobs:
           pip install kenpompy requests databricks-sql-connector pandas pyarrow python-dotenv
 
       - name: Run data pull script
+        timeout-minutes: 20
         env:
           KENPOM_EMAIL: ${{ secrets.KENPOM_EMAIL }}
           KENPOM_PASSWORD: ${{ secrets.KENPOM_PASSWORD }}
@@ -36,6 +37,7 @@ jobs:
           python APIPull.py
 
       - name: Set up dbt
+        timeout-minutes: 10
         run: |
           pip install dbt-databricks
 
@@ -57,12 +59,14 @@ jobs:
           EOF
 
       - name: Run dbt
+        timeout-minutes: 30
         run: |
           cd cbb_analytics
           dbt deps
           dbt run
 
       - name: Generate game predictions
+        timeout-minutes: 20
         env:
           DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
           DATABRICKS_HTTP_PATH: ${{ secrets.DATABRICKS_HTTP_PATH }}
@@ -72,6 +76,7 @@ jobs:
           python GamePredictions.py
 
       - name: Update game results
+        timeout-minutes: 20
         env:
           DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
           DATABRICKS_HTTP_PATH: ${{ secrets.DATABRICKS_HTTP_PATH }}
