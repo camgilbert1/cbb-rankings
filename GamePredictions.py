@@ -164,21 +164,24 @@ def normalize_team_name_for_odds(espn_team_name, vegas_spreads=None):
     return espn_team_name
 
 
-def get_todays_games():
+def get_todays_games(date=None):
     """
-    Fetch today's scheduled college basketball games from ESPN API
+    Fetch scheduled college basketball games from ESPN API.
+
+    Args:
+        date (str): Date string in YYYYMMDD format. Defaults to today (Eastern time).
 
     Returns:
-        pd.DataFrame: Today's scheduled games
+        pd.DataFrame: Scheduled games with neutral_site flag
     """
-    # Use Eastern Time for date to match college basketball schedule
-    eastern = pytz.timezone('US/Eastern')
-    today_eastern = datetime.now(eastern).strftime('%Y%m%d')
-    print(f"Fetching games from ESPN for {today_eastern}...")
+    if date is None:
+        eastern = pytz.timezone('US/Eastern')
+        date = datetime.now(eastern).strftime('%Y%m%d')
+    print(f"Fetching games from ESPN for {date}...")
 
     try:
         url = "https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard"
-        params = {'dates': today_eastern, 'limit': 300, 'groups': 50}
+        params = {'dates': date, 'limit': 300, 'groups': 50}
         response = requests.get(url, params=params)
         response.raise_for_status()
 
@@ -194,16 +197,21 @@ def get_todays_games():
             home_team = next(c for c in competitors if c['homeAway'] == 'home')
             away_team = next(c for c in competitors if c['homeAway'] == 'away')
 
+            # Detect neutral-site games (NCAA tournament, conference tournaments, bowls)
+            neutral_site = competition.get('neutralSite', False)
+
             game_list.append({
                 'game_id': game['id'],
                 'game_time': game['date'],
                 'home_team': home_team['team']['displayName'],
                 'away_team': away_team['team']['displayName'],
-                'status': game['status']['type']['name']
+                'status': game['status']['type']['name'],
+                'neutral_site': neutral_site,
             })
 
         df = pd.DataFrame(game_list)
-        print(f"✓ Found {len(df)} games scheduled for today")
+        neutral_count = df['neutral_site'].sum() if not df.empty else 0
+        print(f"✓ Found {len(df)} games ({neutral_count} neutral-site)")
         return df
 
     except Exception as e:
@@ -455,7 +463,7 @@ def find_team_match(espn_name, team_stats):
     return None
 
 
-def calculate_matchup_features(home_team, away_team, team_stats):
+def calculate_matchup_features(home_team, away_team, team_stats, neutral_site=False):
     """
     Calculate prediction features for a matchup
 
@@ -463,6 +471,7 @@ def calculate_matchup_features(home_team, away_team, team_stats):
         home_team (str): Home team name
         away_team (str): Away team name
         team_stats (pd.DataFrame): Team statistics
+        neutral_site (bool): True for neutral-site games (tournament, etc.) — zeroes home court advantage
 
     Returns:
         dict: Calculated features
@@ -490,6 +499,9 @@ def calculate_matchup_features(home_team, away_team, team_stats):
     home_stats = home_stats.iloc[0]
     away_stats = away_stats.iloc[0]
 
+    # No home court advantage at neutral sites (NCAA tournament, conference tournaments)
+    hca = 0.0 if neutral_site else 3.5
+
     # Calculate differences
     features = {
         'efficiency_margin_diff': home_stats['adj_efficiency_margin'] - away_stats['adj_efficiency_margin'],
@@ -497,7 +509,8 @@ def calculate_matchup_features(home_team, away_team, team_stats):
         'def_efficiency_diff': home_stats['adj_defensive_efficiency'] - away_stats['adj_defensive_efficiency'],
         'tempo_diff': home_stats['adj_tempo'] - away_stats['adj_tempo'],
         'rank_diff': away_stats['overall_rank'] - home_stats['overall_rank'],  # Positive if home team is better
-        'home_court_advantage': 3.5,  # Standard home court advantage
+        'home_court_advantage': hca,
+        'neutral_site': neutral_site,
     }
 
     return features
@@ -676,16 +689,19 @@ def upload_predictions_to_databricks(predictions_df):
 # MAIN EXECUTION
 # =============================================================================
 
-def main():
-    """Main execution function"""
+def main(date=None):
+    """Main execution function
 
+    Args:
+        date (str): Optional date in YYYYMMDD format. Defaults to today.
+    """
     print("="*80)
     print("COLLEGE BASKETBALL GAME PREDICTIONS")
     print("="*80)
     print(f"Date: {datetime.now().strftime('%B %d, %Y')}\n")
 
-    # Get today's games
-    games = get_todays_games()
+    # Get games for specified date (or today)
+    games = get_todays_games(date=date)
 
     if games.empty:
         print("\nNo games scheduled for today.")
@@ -742,8 +758,11 @@ def main():
         if away_spread is None and vegas_spreads:
             print(f"  ⚠️  No spread found for: '{away_team}' (tried: '{away_team_normalized}')")
 
-        # Calculate features
-        features = calculate_matchup_features(home_team, away_team, team_stats)
+        # Calculate features (neutral site = no home court advantage)
+        neutral_site = bool(game.get('neutral_site', False))
+        if neutral_site:
+            print(f"  🏟️  Neutral site game")
+        features = calculate_matchup_features(home_team, away_team, team_stats, neutral_site=neutral_site)
 
         # Predict
         prediction = predict_game(home_team, away_team, features)
@@ -839,4 +858,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--date', type=str, default=None,
+                        help='Date in YYYYMMDD format (default: today)')
+    args = parser.parse_args()
+    main(date=args.date)
