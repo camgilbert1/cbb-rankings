@@ -74,8 +74,8 @@ jobs:
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
         run: |
           python GamePredictions.py
+          python GamePredictions.py --date 20260319
           python GamePredictions.py --date 20260320
-          python GamePredictions.py --date 20260321
 
       - name: Update game results
         timeout-minutes: 20

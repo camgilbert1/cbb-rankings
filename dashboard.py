@@ -63,7 +63,7 @@ def load_data():
 
 @st.cache_data(ttl=21600)  # Cache for 6 hours (data only updates at 6 AM)
 def load_predictions():
-    """Load today's game predictions from Databricks with actual results"""
+    """Load today's and upcoming game predictions from Databricks with actual results"""
     try:
         connection = sql.connect(
             server_hostname=st.secrets.get("DATABRICKS_HOST", os.getenv("DATABRICKS_HOST")),
@@ -75,9 +75,11 @@ def load_predictions():
         # Get today's date in Eastern Time (not UTC)
         eastern = pytz.timezone('US/Eastern')
         today = pd.Timestamp.now(tz=eastern).strftime('%Y-%m-%d')
+        week_out = (pd.Timestamp.now(tz=eastern) + pd.Timedelta(days=7)).strftime('%Y-%m-%d')
 
         cursor.execute(f"""
             SELECT
+                p.game_date,
                 p.game_time,
                 p.home_team,
                 p.away_team,
@@ -100,8 +102,9 @@ def load_predictions():
                 ON p.home_team = r.home_team
                 AND p.away_team = r.away_team
                 AND ABS(DATEDIFF(p.game_date, r.game_date)) <= 1
-            WHERE p.game_date = '{today}'
-            ORDER BY p.game_time
+            WHERE p.game_date >= '{today}'
+              AND p.game_date <= '{week_out}'
+            ORDER BY p.game_date, p.game_time
         """)
 
         df = cursor.fetchall_arrow().to_pandas()
@@ -378,7 +381,7 @@ if df is not None:
         ]
 
     # Tabs
-    tab1, tab2, tab3, tab4 = st.tabs(["📊 Rankings", "🎯 Today's Picks", "🏆 Bracketology", "📈 Performance"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📊 Rankings", "🎯 Picks", "🏆 Bracketology", "📈 Performance"])
 
     # =========================================================================
     # TAB 1: RANKINGS
@@ -436,10 +439,13 @@ if df is not None:
     # =========================================================================
     with tab2:
         if not predictions_df.empty:
-            st.subheader(f"🎯 Today's Game Predictions ({len(predictions_df)} games)")
+            st.subheader(f"🎯 Game Predictions ({len(predictions_df)} games)")
 
             # Create compact display dataframe
             display_predictions = predictions_df.copy()
+
+            # Format date column
+            display_predictions['Date'] = pd.to_datetime(display_predictions['game_date']).dt.strftime('%a %b %-d')
 
             # Format matchup column
             display_predictions['Matchup'] = display_predictions.apply(
@@ -534,7 +540,7 @@ if df is not None:
 
             # Select and display columns
             compact_df = display_predictions[[
-                'Matchup', 'Status', 'Spread', 'Prediction', 'Pred Score', 'Win %', 'Win Conf.',
+                'Date', 'Matchup', 'Status', 'Spread', 'Prediction', 'Pred Score', 'Win %', 'Win Conf.',
                 'ATS Pick', 'ATS Conf.', 'Actual Score', 'Actual Winner', 'Actual ATS'
             ]]
 
@@ -545,7 +551,7 @@ if df is not None:
                 height=min(400, len(compact_df) * 35 + 38)
             )
         else:
-            st.info("No predictions available for today yet. Check back after the daily predictions run.")
+            st.info("No predictions available yet. Check back after the daily predictions run.")
 
     # =========================================================================
     # TAB 3: BRACKETOLOGY
