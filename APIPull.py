@@ -8,11 +8,61 @@ Fetches current college basketball rankings from multiple sources:
 
 import pandas as pd
 import requests
+import cloudscraper
 import kenpompy as kenpompy
-from kenpompy.utils import login
 from kenpompy.summary import get_efficiency
 from databricks import sql
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+
+def login_kenpom(email: str, password: str):
+    """
+    Custom KenPom login that doesn't rely on kenpompy's 'Logged in as' text check,
+    which broke when KenPom updated their UI.
+    """
+    browser = cloudscraper.create_scraper()
+    index_page = browser.get('https://kenpom.com/index.php')
+
+    # Print the login form to see current field names and any hidden fields
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(index_page.text, 'html.parser')
+    form = soup.find('form')
+    print(f"  DEBUG - Login form found: {form is not None}")
+    if form:
+        print(f"  DEBUG - Form action: {form.get('action')}")
+        for inp in form.find_all('input'):
+            print(f"  DEBUG - Form field: name='{inp.get('name')}' type='{inp.get('type')}' value='{inp.get('value')}'")
+
+    form_data = {
+        'email': email,
+        'password': password,
+        'submit': 'Login!',
+    }
+
+    login_response = browser.post(
+        'https://kenpom.com/handlers/login_handler.php',
+        data=form_data,
+        allow_redirects=True
+    )
+    print(f"  DEBUG - Login POST status: {login_response.status_code}")
+    print(f"  DEBUG - Login POST response (first 300): {login_response.text[:300]}")
+
+    home_page = browser.get('https://kenpom.com/')
+    page_text = home_page.text.lower()
+
+    print(f"  DEBUG - Home page status: {home_page.status_code}")
+    print(f"  DEBUG - Page contains 'logout': {'logout' in page_text}")
+    print(f"  DEBUG - Page contains 'logged in': {'logged in' in page_text}")
+    print(f"  DEBUG - Page contains 'login' form: {'name=\"password\"' in home_page.text}")
+
+    authenticated = any(s in page_text for s in ['logout', 'log out', 'sign out', 'logged in'])
+    if not authenticated and 'name="password"' in home_page.text:
+        raise Exception('Logging in failed - check your KenPom credentials in .env')
+
+    return browser
 
 # =============================================================================
 # CONFIGURATION - KenPom credentials from environment variables
@@ -37,7 +87,7 @@ def fetch_kenpom_ratings(year=2026):
     print(f"Logging into KenPom...")
 
     # Create browser session and login
-    browser = login(KENPOM_EMAIL, KENPOM_PASSWORD)
+    browser = login_kenpom(KENPOM_EMAIL, KENPOM_PASSWORD)
 
     print(f"Fetching {year} ratings...")
 
@@ -265,6 +315,72 @@ def upload_to_databricks(df, table_name, year):
         print(f"   CSV file saved locally as backup.")
 
 
+def rebuild_gold_table(year=2027):
+    """
+    Rebuild the gold_team_rankings table directly from raw KenPom data.
+    Replaces the dbt run step so dbt doesn't need to be installed.
+    """
+    host = os.getenv("DATABRICKS_HOST")
+    http_path = os.getenv("DATABRICKS_HTTP_PATH")
+    token = os.getenv("DATABRICKS_TOKEN")
+
+    if not all([host, http_path, token]):
+        print("⚠️  Databricks credentials not found. Skipping gold table rebuild.")
+        return
+
+    print("\nChecking gold_team_rankings table...")
+
+    try:
+        from datetime import date
+        connection = sql.connect(
+            server_hostname=host,
+            http_path=http_path,
+            access_token=token
+        )
+        cursor = connection.cursor()
+
+        # Skip rebuild if already done this week (KenPom data doesn't change daily)
+        try:
+            cursor.execute("SELECT MAX(loaded_at) FROM workspace.default_gold.gold_team_rankings")
+            row = cursor.fetchone()
+            if row and row[0] and hasattr(row[0], 'date'):
+                days_since_rebuild = (date.today() - row[0].date()).days
+                if days_since_rebuild < 2:
+                    print(f"✓ gold_team_rankings rebuilt {days_since_rebuild} day(s) ago, skipping")
+                    cursor.close()
+                    connection.close()
+                    return
+        except Exception:
+            pass  # Table doesn't exist yet, proceed with rebuild
+
+        print("  Rebuilding gold_team_rankings...")
+        cursor.execute(f"""
+            CREATE OR REPLACE TABLE workspace.default_gold.gold_team_rankings
+            USING DELTA AS
+            SELECT
+                Team                                                                                                        AS team_name,
+                Conference                                                                                                  AS conference,
+                (TRY_CAST(Off__Efficiency_Adj_Rank AS DOUBLE) - TRY_CAST(Def__Efficiency_Adj AS DOUBLE))                  AS adj_efficiency_margin,
+                TRY_CAST(Off__Efficiency_Adj_Rank AS DOUBLE)                                                               AS adj_offensive_efficiency,
+                TRY_CAST(Def__Efficiency_Adj AS DOUBLE)                                                                    AS adj_defensive_efficiency,
+                TRY_CAST(Tempo_Adj AS DOUBLE)                                                                              AS adj_tempo,
+                ROW_NUMBER() OVER (ORDER BY (TRY_CAST(Off__Efficiency_Adj_Rank AS DOUBLE) - TRY_CAST(Def__Efficiency_Adj AS DOUBLE)) DESC) AS overall_rank,
+                TRY_CAST(Off__Efficiency_Adj AS INT)                                                                       AS offensive_rank,
+                TRY_CAST(Def__Efficiency_Adj_Rank AS INT)                                                                  AS defensive_rank,
+                current_timestamp()                                                                                        AS loaded_at
+            FROM workspace.default.kenpom_ratings_{year}
+            WHERE Team IS NOT NULL
+            ORDER BY overall_rank
+        """)
+
+        cursor.close()
+        connection.close()
+        print("✓ gold_team_rankings rebuilt successfully")
+
+    except Exception as e:
+        print(f"❌ Error rebuilding gold table: {e}")
+
+
 def main():
     """Main execution function"""
 
@@ -273,7 +389,7 @@ def main():
     # =============================================================================
 
     # 1. KenPom (PRIMARY DATA SOURCE)
-    kenpom_data = fetch_kenpom_ratings(year=2026)
+    kenpom_data = fetch_kenpom_ratings(year=2027)
 
     # 2. Haslametrics (commented out - needs more work on table parsing)
     # hasla_data = fetch_haslametrics_ratings()
@@ -332,12 +448,15 @@ def main():
     # =============================================================================
 
     # Save KenPom
-    kenpom_file = "kenpom_ratings_2026.csv"
+    kenpom_file = "kenpom_ratings_2027.csv"
     kenpom_data.to_csv(kenpom_file, index=False)
     print(f"\n✓ KenPom data saved to: {kenpom_file}")
 
     # Upload to Databricks
-    upload_to_databricks(kenpom_data, "kenpom_ratings", 2026)
+    upload_to_databricks(kenpom_data, "kenpom_ratings", 2027)
+
+    # Rebuild the gold table (replaces dbt run)
+    rebuild_gold_table(year=2027)
 
     # Save Haslametrics
     if hasla_data is not None:
