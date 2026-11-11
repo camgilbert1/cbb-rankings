@@ -577,7 +577,8 @@ def predict_game(home_team, away_team, features):
     elif features['def_efficiency_diff'] > 3:
         key_factors.append(f"✗ Weaker defense (+{features['def_efficiency_diff']:.1f})")
 
-    key_factors.append(f"✓ Home court advantage (+{features['home_court_advantage']:.1f})")
+    if features['home_court_advantage'] > 0:
+        key_factors.append(f"✓ Home court advantage (+{features['home_court_advantage']:.1f})")
 
     return {
         'home_team': home_team,
