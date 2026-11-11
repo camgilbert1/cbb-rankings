@@ -1,10 +1,10 @@
 name: Daily Data Update
 
-# Run every day at 11:30 AM EST (4:30 PM UTC)
+# Runs every day at 11:30 AM ET (4:30 PM UTC)
+# APIPull only rebuilds the gold table if it's been 3+ days since last rebuild
 on:
   schedule:
     - cron: '30 16 * * *'
-  # Also allow manual trigger
   workflow_dispatch:
 
 jobs:
@@ -20,12 +20,12 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Python dependencies
+      - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install kenpompy requests databricks-sql-connector pandas pyarrow python-dotenv
+          pip install kenpompy requests databricks-sql-connector pandas pyarrow python-dotenv pytz beautifulsoup4 cloudscraper
 
-      - name: Run data pull script
+      - name: Refresh KenPom data and rebuild gold table
         timeout-minutes: 20
         env:
           KENPOM_EMAIL: ${{ secrets.KENPOM_EMAIL }}
@@ -33,37 +33,7 @@ jobs:
           DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
           DATABRICKS_HTTP_PATH: ${{ secrets.DATABRICKS_HTTP_PATH }}
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
-        run: |
-          python APIPull.py
-
-      - name: Set up dbt
-        timeout-minutes: 10
-        run: |
-          pip install dbt-databricks
-
-      - name: Create dbt profiles.yml
-        run: |
-          mkdir -p ~/.dbt
-          cat > ~/.dbt/profiles.yml << EOF
-          cbb_analytics:
-            outputs:
-              dev:
-                catalog: workspace
-                host: ${{ secrets.DATABRICKS_HOST }}
-                http_path: ${{ secrets.DATABRICKS_HTTP_PATH }}
-                schema: default
-                threads: 1
-                token: ${{ secrets.DATABRICKS_TOKEN }}
-                type: databricks
-            target: dev
-          EOF
-
-      - name: Run dbt
-        timeout-minutes: 30
-        run: |
-          cd cbb_analytics
-          dbt deps
-          dbt run
+        run: python APIPull.py
 
       - name: Generate game predictions
         timeout-minutes: 20
@@ -72,10 +42,7 @@ jobs:
           DATABRICKS_HTTP_PATH: ${{ secrets.DATABRICKS_HTTP_PATH }}
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
-        run: |
-          python GamePredictions.py
-          python GamePredictions.py --date 20260319
-          python GamePredictions.py --date 20260320
+        run: python GamePredictions.py
 
       - name: Update game results
         timeout-minutes: 20
@@ -83,14 +50,11 @@ jobs:
           DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
           DATABRICKS_HTTP_PATH: ${{ secrets.DATABRICKS_HTTP_PATH }}
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
-        run: |
-          python UpdateResults.py
+        run: python UpdateResults.py
 
       - name: Summary
         run: |
-          echo "✅ Data pipeline completed successfully!"
-          echo "📊 KenPom data refreshed"
-          echo "🔄 dbt transformations applied"
+          echo "✅ Pipeline complete"
+          echo "📊 KenPom data refreshed (gold table rebuilds every 3 days)"
           echo "🎯 Game predictions generated"
           echo "📈 Game results updated"
-          echo "🌐 Dashboard will show updated data"
