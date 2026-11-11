@@ -11,4 +11,4 @@
 ) }}
 
 SELECT *
-FROM workspace.default.kenpom_ratings_2026
+FROM workspace.default.kenpom_ratings_2027
