@@ -445,7 +445,7 @@ if df is not None:
             display_predictions = predictions_df.copy()
 
             # Format date column
-            display_predictions['Date'] = pd.to_datetime(display_predictions['game_date']).dt.strftime('%a %b %-d')
+            display_predictions['Date'] = pd.to_datetime(display_predictions['game_date']).dt.strftime('%a %b %d').str.lstrip('0')
 
             # Format matchup column
             display_predictions['Matchup'] = display_predictions.apply(
