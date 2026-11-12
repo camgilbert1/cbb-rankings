@@ -360,11 +360,11 @@ def rebuild_gold_table(year=2027):
             SELECT
                 Team                                                                                                        AS team_name,
                 Conference                                                                                                  AS conference,
-                (TRY_CAST(Off__Efficiency_Adj_Rank AS DOUBLE) - TRY_CAST(Def__Efficiency_Adj AS DOUBLE))                  AS adj_efficiency_margin,
-                TRY_CAST(Off__Efficiency_Adj_Rank AS DOUBLE)                                                               AS adj_offensive_efficiency,
-                TRY_CAST(Def__Efficiency_Adj AS DOUBLE)                                                                    AS adj_defensive_efficiency,
-                TRY_CAST(Tempo_Adj AS DOUBLE)                                                                              AS adj_tempo,
-                ROW_NUMBER() OVER (ORDER BY (TRY_CAST(Off__Efficiency_Adj_Rank AS DOUBLE) - TRY_CAST(Def__Efficiency_Adj AS DOUBLE)) DESC) AS overall_rank,
+                (TRY_CAST(Tempo_Adj AS DOUBLE) - TRY_CAST(Off__Efficiency_Adj_Rank AS DOUBLE))                            AS adj_efficiency_margin,
+                TRY_CAST(Tempo_Adj AS DOUBLE)                                                                              AS adj_offensive_efficiency,
+                TRY_CAST(Off__Efficiency_Adj_Rank AS DOUBLE)                                                               AS adj_defensive_efficiency,
+                68.0                                                                                                        AS adj_tempo,
+                ROW_NUMBER() OVER (ORDER BY (TRY_CAST(Tempo_Adj AS DOUBLE) - TRY_CAST(Off__Efficiency_Adj_Rank AS DOUBLE)) DESC) AS overall_rank,
                 TRY_CAST(Off__Efficiency_Adj AS INT)                                                                       AS offensive_rank,
                 TRY_CAST(Def__Efficiency_Adj_Rank AS INT)                                                                  AS defensive_rank,
                 current_timestamp()                                                                                        AS loaded_at
