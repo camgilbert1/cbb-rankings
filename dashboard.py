@@ -161,7 +161,9 @@ def load_performance(time_period):
                 SUM(su_correct) AS su_wins,
                 SUM(1 - su_correct) AS su_losses,
                 SUM(CASE WHEN ats_correct = 1 THEN 1 ELSE 0 END) AS ats_wins,
-                SUM(CASE WHEN ats_correct = 0 THEN 1 ELSE 0 END) AS ats_losses
+                SUM(CASE WHEN ats_correct = 0 THEN 1 ELSE 0 END) AS ats_losses,
+                ROUND(AVG(ABS(margin_error)), 1) AS avg_abs_error,
+                ROUND(AVG(margin_error), 1) AS avg_bias
             FROM workspace.default.prediction_outcomes
             WHERE confidence IN ('High', 'Medium', 'Low')
               AND su_correct IS NOT NULL
@@ -173,7 +175,6 @@ def load_performance(time_period):
         cursor.close()
         connection.close()
 
-        # Convert to dictionary
         performance = {}
         for row in results:
             confidence = row[0]
@@ -182,7 +183,9 @@ def load_performance(time_period):
                 'su_wins': row[2],
                 'su_losses': row[3],
                 'ats_wins': row[4],
-                'ats_losses': row[5]
+                'ats_losses': row[5],
+                'avg_abs_error': row[6],
+                'avg_bias': row[7]
             }
 
         return performance
@@ -228,6 +231,63 @@ def load_bracket_predictions():
 
         return df
     except Exception as e:
+        return pd.DataFrame()
+
+
+@st.cache_data(ttl=21600)
+def load_game_log(time_period):
+    """Load game-by-game prediction results from prediction_outcomes"""
+    try:
+        connection = sql.connect(
+            server_hostname=st.secrets.get("DATABRICKS_HOST", os.getenv("DATABRICKS_HOST")),
+            http_path=st.secrets.get("DATABRICKS_HTTP_PATH", os.getenv("DATABRICKS_HTTP_PATH")),
+            access_token=st.secrets.get("DATABRICKS_TOKEN", os.getenv("DATABRICKS_TOKEN")),
+            _socket_timeout=900
+        )
+
+        cursor = connection.cursor()
+
+        eastern = pytz.timezone('US/Eastern')
+        today = pd.Timestamp.now(tz=eastern)
+        if time_period == "Today":
+            date_filter = f"AND game_date = '{today.strftime('%Y-%m-%d')}'"
+        elif time_period == "Yesterday":
+            date_filter = f"AND game_date = '{(today - pd.Timedelta(days=1)).strftime('%Y-%m-%d')}'"
+        elif time_period == "Last 7 Days":
+            date_filter = f"AND game_date >= '{(today - pd.Timedelta(days=7)).strftime('%Y-%m-%d')}'"
+        elif time_period == "Last 30 Days":
+            date_filter = f"AND game_date >= '{(today - pd.Timedelta(days=30)).strftime('%Y-%m-%d')}'"
+        else:
+            date_filter = ""
+
+        cursor.execute(f"""
+            SELECT
+                game_date,
+                away_team,
+                home_team,
+                confidence,
+                predicted_winner,
+                actual_winner,
+                ROUND(win_probability * 100, 0) AS win_pct,
+                su_correct,
+                ROUND(predicted_margin, 1) AS predicted_margin,
+                actual_margin,
+                ROUND(margin_error, 1) AS margin_error,
+                vegas_spread,
+                cover_pick,
+                ats_correct
+            FROM workspace.default.prediction_outcomes
+            WHERE su_correct IS NOT NULL
+            {date_filter}
+            ORDER BY game_date DESC, home_team
+        """)
+
+        df = cursor.fetchall_arrow().to_pandas()
+        cursor.close()
+        connection.close()
+        return df
+
+    except Exception:
         return pd.DataFrame()
 
 
@@ -576,52 +636,34 @@ if df is not None:
 
         # Load performance data
         performance = load_performance(time_period)
+        game_log = load_game_log(time_period)
 
         if performance:
             # Display performance by confidence level
             col1, col2, col3 = st.columns(3)
 
-            # High Confidence
-            with col1:
-                if 'High' in performance:
-                    p = performance['High']
-                    su_pct = (p['su_wins'] / p['total'] * 100) if p['total'] > 0 else 0
-                    ats_pct = (p['ats_wins'] / p['total'] * 100) if p['total'] > 0 else 0
-                    st.metric("🟢 High Confidence", f"{p['total']} games")
-                    st.write(f"**SU:** {p['su_wins']}-{p['su_losses']} ({su_pct:.0f}%)")
-                    st.write(f"**ATS:** {p['ats_wins']}-{p['ats_losses']} ({ats_pct:.0f}%)")
-                else:
-                    st.metric("🟢 High Confidence", "0-0")
-                    st.write("**SU:** 0-0 (0%)")
-                    st.write("**ATS:** 0-0 (0%)")
-
-            # Medium Confidence
-            with col2:
-                if 'Medium' in performance:
-                    p = performance['Medium']
-                    su_pct = (p['su_wins'] / p['total'] * 100) if p['total'] > 0 else 0
-                    ats_pct = (p['ats_wins'] / p['total'] * 100) if p['total'] > 0 else 0
-                    st.metric("🟡 Medium Confidence", f"{p['total']} games")
-                    st.write(f"**SU:** {p['su_wins']}-{p['su_losses']} ({su_pct:.0f}%)")
-                    st.write(f"**ATS:** {p['ats_wins']}-{p['ats_losses']} ({ats_pct:.0f}%)")
-                else:
-                    st.metric("🟡 Medium Confidence", "0-0")
-                    st.write("**SU:** 0-0 (0%)")
-                    st.write("**ATS:** 0-0 (0%)")
-
-            # Low Confidence
-            with col3:
-                if 'Low' in performance:
-                    p = performance['Low']
-                    su_pct = (p['su_wins'] / p['total'] * 100) if p['total'] > 0 else 0
-                    ats_pct = (p['ats_wins'] / p['total'] * 100) if p['total'] > 0 else 0
-                    st.metric("🔴 Low Confidence", f"{p['total']} games")
-                    st.write(f"**SU:** {p['su_wins']}-{p['su_losses']} ({su_pct:.0f}%)")
-                    st.write(f"**ATS:** {p['ats_wins']}-{p['ats_losses']} ({ats_pct:.0f}%)")
-                else:
-                    st.metric("🔴 Low Confidence", "0-0")
-                    st.write("**SU:** 0-0 (0%)")
-                    st.write("**ATS:** 0-0 (0%)")
+            for col, label, key, emoji in [
+                (col1, "High Confidence", "High", "🟢"),
+                (col2, "Medium Confidence", "Medium", "🟡"),
+                (col3, "Low Confidence", "Low", "🔴"),
+            ]:
+                with col:
+                    if key in performance:
+                        p = performance[key]
+                        su_pct = (p['su_wins'] / p['total'] * 100) if p['total'] > 0 else 0
+                        ats_pct = (p['ats_wins'] / p['total'] * 100) if p['total'] > 0 else 0
+                        st.metric(f"{emoji} {label}", f"{p['total']} games")
+                        st.write(f"**SU:** {p['su_wins']}-{p['su_losses']} ({su_pct:.0f}%)")
+                        st.write(f"**ATS:** {p['ats_wins']}-{p['ats_losses']} ({ats_pct:.0f}%)")
+                        st.write(f"**Avg Error:** ±{p['avg_abs_error']} pts")
+                        bias = p['avg_bias']
+                        bias_label = f"+{bias}" if bias > 0 else str(bias)
+                        st.write(f"**Bias:** {bias_label} pts (home)")
+                    else:
+                        st.metric(f"{emoji} {label}", "0 games")
+                        st.write("**SU:** 0-0 (0%)")
+                        st.write("**ATS:** 0-0 (0%)")
+                        st.write("**Avg Error:** —")
 
             # Overall stats
             total_games = sum(p['total'] for p in performance.values())
@@ -629,16 +671,53 @@ if df is not None:
             total_su_losses = sum(p['su_losses'] for p in performance.values())
             total_ats_wins = sum(p['ats_wins'] for p in performance.values())
             total_ats_losses = sum(p['ats_losses'] for p in performance.values())
+            all_errors = [p['avg_abs_error'] for p in performance.values() if p['avg_abs_error'] is not None]
+            overall_avg_error = round(sum(all_errors) / len(all_errors), 1) if all_errors else None
 
             if total_games > 0:
                 st.markdown("---")
-                col1, col2 = st.columns(2)
+                col1, col2, col3 = st.columns(3)
                 with col1:
-                    su_pct = (total_su_wins / total_games * 100) if total_games > 0 else 0
+                    su_pct = (total_su_wins / total_games * 100)
                     st.metric("Overall Straight Up", f"{total_su_wins}-{total_su_losses} ({su_pct:.1f}%)")
                 with col2:
-                    ats_pct = (total_ats_wins / total_games * 100) if total_games > 0 else 0
+                    ats_pct = (total_ats_wins / total_games * 100)
                     st.metric("Overall Against The Spread", f"{total_ats_wins}-{total_ats_losses} ({ats_pct:.1f}%)")
+                with col3:
+                    if overall_avg_error is not None:
+                        st.metric("Avg Margin Error", f"±{overall_avg_error} pts")
+
+            # Game log
+            if not game_log.empty:
+                st.markdown("---")
+                st.subheader("Game Log")
+
+                log = game_log.copy()
+                log['Date'] = pd.to_datetime(log['game_date']).dt.strftime('%b %d')
+                log['Matchup'] = log['away_team'] + ' @ ' + log['home_team']
+                log['Conf'] = log['confidence']
+                log['Predicted'] = log['predicted_winner']
+                log['Actual'] = log['actual_winner']
+                log['SU'] = log['su_correct'].apply(lambda x: 'W' if x == 1 else 'L')
+                log['Win %'] = log['win_pct'].apply(lambda x: f"{int(x)}%")
+                log['Pred Margin'] = log['predicted_margin'].apply(
+                    lambda x: f"+{x:.1f}" if x > 0 else f"{x:.1f}"
+                )
+                log['Actual Margin'] = log['actual_margin'].apply(
+                    lambda x: f"+{x}" if x > 0 else str(x)
+                )
+                log['Error'] = log['margin_error'].apply(
+                    lambda x: f"+{x:.1f}" if x > 0 else f"{x:.1f}"
+                )
+                log['ATS'] = log['ats_correct'].apply(
+                    lambda x: 'W' if x == 1 else ('L' if x == 0 else '—')
+                )
+
+                display_log = log[['Date', 'Matchup', 'Conf', 'Predicted', 'Actual', 'SU',
+                                   'Win %', 'Pred Margin', 'Actual Margin', 'Error', 'ATS']]
+
+                st.dataframe(display_log, use_container_width=True, hide_index=True,
+                             height=min(600, len(display_log) * 35 + 38))
         else:
             st.info("No completed games with predictions yet. Performance tracking will begin after games are played!")
 
