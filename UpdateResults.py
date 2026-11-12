@@ -99,7 +99,8 @@ def store_results_to_databricks(results_df):
         connection = sql.connect(
             server_hostname=DATABRICKS_HOST,
             http_path=DATABRICKS_HTTP_PATH,
-            access_token=DATABRICKS_TOKEN
+            access_token=DATABRICKS_TOKEN,
+            _socket_timeout=900
         )
 
         cursor = connection.cursor()
@@ -160,7 +161,8 @@ def update_prediction_outcomes():
         connection = sql.connect(
             server_hostname=DATABRICKS_HOST,
             http_path=DATABRICKS_HTTP_PATH,
-            access_token=DATABRICKS_TOKEN
+            access_token=DATABRICKS_TOKEN,
+            _socket_timeout=900
         )
         cursor = connection.cursor()
 
