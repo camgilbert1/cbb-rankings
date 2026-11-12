@@ -143,13 +143,13 @@ def load_performance(time_period):
         eastern = pytz.timezone('US/Eastern')
         today = pd.Timestamp.now(tz=eastern)
         if time_period == "Today":
-            date_filter = f"AND p.game_date = '{today.strftime('%Y-%m-%d')}'"
+            date_filter = f"AND game_date = '{today.strftime('%Y-%m-%d')}'"
         elif time_period == "Yesterday":
-            date_filter = f"AND p.game_date = '{(today - pd.Timedelta(days=1)).strftime('%Y-%m-%d')}'"
+            date_filter = f"AND game_date = '{(today - pd.Timedelta(days=1)).strftime('%Y-%m-%d')}'"
         elif time_period == "Last 7 Days":
-            date_filter = f"AND p.game_date >= '{(today - pd.Timedelta(days=7)).strftime('%Y-%m-%d')}'"
+            date_filter = f"AND game_date >= '{(today - pd.Timedelta(days=7)).strftime('%Y-%m-%d')}'"
         elif time_period == "Last 30 Days":
-            date_filter = f"AND p.game_date >= '{(today - pd.Timedelta(days=30)).strftime('%Y-%m-%d')}'"
+            date_filter = f"AND game_date >= '{(today - pd.Timedelta(days=30)).strftime('%Y-%m-%d')}'"
         else:  # All Time
             date_filter = ""
 
