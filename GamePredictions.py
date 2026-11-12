@@ -232,7 +232,8 @@ def get_team_stats_from_databricks():
         connection = sql.connect(
             server_hostname=DATABRICKS_HOST,
             http_path=DATABRICKS_HTTP_PATH,
-            access_token=DATABRICKS_TOKEN
+            access_token=DATABRICKS_TOKEN,
+            _socket_timeout=900
         )
 
         cursor = connection.cursor()
@@ -619,7 +620,8 @@ def upload_predictions_to_databricks(predictions_df):
         connection = sql.connect(
             server_hostname=DATABRICKS_HOST,
             http_path=DATABRICKS_HTTP_PATH,
-            access_token=DATABRICKS_TOKEN
+            access_token=DATABRICKS_TOKEN,
+            _socket_timeout=900
         )
 
         cursor = connection.cursor()
