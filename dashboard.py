@@ -93,17 +93,17 @@ def load_predictions():
                 p.vegas_spread,
                 p.cover_pick,
                 p.cover_confidence,
-                o.actual_home_score,
-                o.actual_away_score,
+                r.home_score AS actual_home_score,
+                r.away_score AS actual_away_score,
                 CASE
-                    WHEN o.actual_home_score IS NOT NULL THEN 'Final'
+                    WHEN r.home_score IS NOT NULL THEN 'Final'
                     ELSE 'Scheduled'
-                END as game_status
+                END AS game_status
             FROM workspace.default.prediction_history p
-            LEFT JOIN workspace.default.prediction_outcomes o
-                ON p.home_team = o.home_team
-                AND p.away_team = o.away_team
-                AND p.game_date = o.game_date
+            LEFT JOIN workspace.default.game_results r
+                ON p.home_team = r.home_team
+                AND p.away_team = r.away_team
+                AND ABS(DATEDIFF(p.game_date, r.game_date)) <= 1
             WHERE p.game_date >= '{today}'
               AND p.game_date <= '{week_out}'
             ORDER BY p.game_date, p.game_time
