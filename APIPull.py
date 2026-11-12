@@ -226,7 +226,8 @@ def upload_to_databricks(df, table_name, year):
         connection = sql.connect(
             server_hostname=host,
             http_path=http_path,
-            access_token=token
+            access_token=token,
+            _socket_timeout=900
         )
 
         cursor = connection.cursor()
@@ -335,7 +336,8 @@ def rebuild_gold_table(year=2027):
         connection = sql.connect(
             server_hostname=host,
             http_path=http_path,
-            access_token=token
+            access_token=token,
+            _socket_timeout=900
         )
         cursor = connection.cursor()
 
