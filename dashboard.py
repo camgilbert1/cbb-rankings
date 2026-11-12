@@ -150,59 +150,19 @@ def load_performance(time_period):
         else:  # All Time
             date_filter = ""
 
-        # Query to join predictions with results and calculate performance
-        # Join on team matchup within ±1 day to handle ESPN API date inconsistencies
+        # Query pre-materialized prediction_outcomes table (simpler, no join needed)
         cursor.execute(f"""
-            WITH matched_games AS (
-                SELECT
-                    p.game_date,
-                    p.home_team,
-                    p.away_team,
-                    p.predicted_winner,
-                    p.predicted_home_score,
-                    p.predicted_away_score,
-                    p.confidence,
-                    p.vegas_spread,
-                    p.cover_pick,
-                    r.home_score AS actual_home_score,
-                    r.away_score AS actual_away_score,
-                    CASE
-                        WHEN r.home_score > r.away_score THEN p.home_team
-                        ELSE p.away_team
-                    END AS actual_winner,
-                    (r.home_score - r.away_score) AS actual_margin
-                FROM workspace.default.prediction_history p
-                INNER JOIN workspace.default.game_results r
-                    ON p.home_team = r.home_team
-                    AND p.away_team = r.away_team
-                    AND ABS(DATEDIFF(p.game_date, r.game_date)) <= 1
-                WHERE 1=1 {date_filter}
-            )
             SELECT
                 confidence,
-                COUNT(*) as total_games,
-                SUM(CASE WHEN predicted_winner = actual_winner THEN 1 ELSE 0 END) as su_wins,
-                SUM(CASE WHEN predicted_winner != actual_winner THEN 1 ELSE 0 END) as su_losses,
-                SUM(CASE
-                    -- We picked home (adjusted > 0) and home covered (actual adjusted > 0)
-                    WHEN (predicted_home_score - predicted_away_score + vegas_spread) > 0
-                         AND (actual_margin + vegas_spread) > 0 THEN 1
-                    -- We picked away (adjusted <= 0) and away covered (actual adjusted < 0)
-                    WHEN (predicted_home_score - predicted_away_score + vegas_spread) <= 0
-                         AND (actual_margin + vegas_spread) < 0 THEN 1
-                    ELSE 0
-                END) as ats_wins,
-                SUM(CASE
-                    -- We picked home (adjusted > 0) but away covered (actual adjusted < 0)
-                    WHEN (predicted_home_score - predicted_away_score + vegas_spread) > 0
-                         AND (actual_margin + vegas_spread) < 0 THEN 1
-                    -- We picked away (adjusted <= 0) but home covered (actual adjusted > 0)
-                    WHEN (predicted_home_score - predicted_away_score + vegas_spread) <= 0
-                         AND (actual_margin + vegas_spread) > 0 THEN 1
-                    ELSE 0
-                END) as ats_losses
-            FROM matched_games
+                COUNT(*) AS total_games,
+                SUM(su_correct) AS su_wins,
+                SUM(1 - su_correct) AS su_losses,
+                SUM(CASE WHEN ats_correct = 1 THEN 1 ELSE 0 END) AS ats_wins,
+                SUM(CASE WHEN ats_correct = 0 THEN 1 ELSE 0 END) AS ats_losses
+            FROM workspace.default.prediction_outcomes
             WHERE confidence IN ('High', 'Medium', 'Low')
+              AND su_correct IS NOT NULL
+            {date_filter}
             GROUP BY confidence
         """)
 
