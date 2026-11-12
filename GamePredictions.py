@@ -508,13 +508,17 @@ def calculate_matchup_features(home_team, away_team, team_stats, neutral_site=Fa
         'off_efficiency_diff': home_stats['adj_offensive_efficiency'] - away_stats['adj_offensive_efficiency'],
         'def_efficiency_diff': home_stats['adj_defensive_efficiency'] - away_stats['adj_defensive_efficiency'],
         'tempo_diff': home_stats['adj_tempo'] - away_stats['adj_tempo'],
-        'rank_diff': away_stats['overall_rank'] - home_stats['overall_rank'],  # Positive if home team is better
+        'rank_diff': away_stats['overall_rank'] - home_stats['overall_rank'],
         'home_court_advantage': hca,
         'neutral_site': neutral_site,
         'home_oe': float(home_stats['adj_offensive_efficiency']),
         'home_de': float(home_stats['adj_defensive_efficiency']),
         'away_oe': float(away_stats['adj_offensive_efficiency']),
         'away_de': float(away_stats['adj_defensive_efficiency']),
+        'home_adj_em': float(home_stats['adj_efficiency_margin']),
+        'away_adj_em': float(away_stats['adj_efficiency_margin']),
+        'home_rank': int(home_stats['overall_rank']),
+        'away_rank': int(away_stats['overall_rank']),
     }
 
     return features
@@ -635,10 +639,36 @@ def upload_predictions_to_databricks(predictions_df):
                 vegas_spread DOUBLE,
                 cover_pick STRING,
                 cover_confidence STRING,
-                prediction_date TIMESTAMP
+                prediction_date TIMESTAMP,
+                home_adj_em DOUBLE,
+                away_adj_em DOUBLE,
+                home_oe DOUBLE,
+                away_oe DOUBLE,
+                home_de DOUBLE,
+                away_de DOUBLE,
+                home_rank INT,
+                away_rank INT
             )
             USING DELTA
         """)
+
+        # Add KenPom columns to existing table if they don't exist yet
+        try:
+            cursor.execute("""
+                ALTER TABLE workspace.default.prediction_history
+                ADD COLUMNS (
+                    home_adj_em DOUBLE,
+                    away_adj_em DOUBLE,
+                    home_oe DOUBLE,
+                    away_oe DOUBLE,
+                    home_de DOUBLE,
+                    away_de DOUBLE,
+                    home_rank INT,
+                    away_rank INT
+                )
+            """)
+        except Exception:
+            pass  # Columns already exist
 
         # Delete ONLY predictions for games we're about to regenerate
         # This preserves predictions for games that have already started (lock mechanism)
@@ -679,7 +709,15 @@ def upload_predictions_to_databricks(predictions_df):
                     {row['vegas_spread']},
                     '{cover_pick_escaped}',
                     '{row['cover_confidence']}',
-                    current_timestamp()
+                    current_timestamp(),
+                    {row['home_adj_em']},
+                    {row['away_adj_em']},
+                    {row['home_oe']},
+                    {row['away_oe']},
+                    {row['home_de']},
+                    {row['away_de']},
+                    {row['home_rank']},
+                    {row['away_rank']}
                 )
             """)
 
@@ -837,7 +875,15 @@ def main(date=None):
             'confidence': prediction['confidence'],
             'vegas_spread': home_spread if home_spread is not None else 0.0,
             'cover_pick': cover_pick,
-            'cover_confidence': cover_confidence
+            'cover_confidence': cover_confidence,
+            'home_adj_em': features['home_adj_em'] if features else 0.0,
+            'away_adj_em': features['away_adj_em'] if features else 0.0,
+            'home_oe': features['home_oe'] if features else 0.0,
+            'away_oe': features['away_oe'] if features else 0.0,
+            'home_de': features['home_de'] if features else 0.0,
+            'away_de': features['away_de'] if features else 0.0,
+            'home_rank': features['home_rank'] if features else 0,
+            'away_rank': features['away_rank'] if features else 0,
         })
 
     # Convert to DataFrame
