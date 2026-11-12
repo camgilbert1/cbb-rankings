@@ -520,6 +520,7 @@ def calculate_matchup_features(home_team, away_team, team_stats, neutral_site=Fa
         'away_adj_em': float(away_stats['adj_efficiency_margin']),
         'home_rank': int(home_stats['overall_rank']),
         'away_rank': int(away_stats['overall_rank']),
+        'expected_tempo': (float(home_stats['adj_tempo']) + float(away_stats['adj_tempo'])) / 2,
     }
 
     return features
@@ -557,11 +558,11 @@ def predict_game(home_team, away_team, features):
     win_prob = 1 / (1 + 2.718 ** (-0.03 * net_advantage))
 
     # KenPom methodology: expected score = (team_OE * opp_DE / national_avg) * (possessions / 100)
-    # national_avg ~106 (current D1 average efficiency); avg_tempo ~68 possessions per game
+    # national_avg ~106 (current D1 average efficiency); tempo = avg of two teams' adjusted tempos
     national_avg = 106.0
-    avg_tempo = 68.0
-    predicted_home_score = (features['home_oe'] / national_avg) * (features['away_de'] / national_avg) * national_avg * (avg_tempo / 100) + features['home_court_advantage']
-    predicted_away_score = (features['away_oe'] / national_avg) * (features['home_de'] / national_avg) * national_avg * (avg_tempo / 100)
+    expected_tempo = features['expected_tempo']
+    predicted_home_score = (features['home_oe'] / national_avg) * (features['away_de'] / national_avg) * national_avg * (expected_tempo / 100) + features['home_court_advantage']
+    predicted_away_score = (features['away_oe'] / national_avg) * (features['home_de'] / national_avg) * national_avg * (expected_tempo / 100)
 
     # Determine confidence
     if abs(net_advantage) > 15:
