@@ -23,17 +23,7 @@ def login_kenpom(email: str, password: str):
     which broke when KenPom updated their UI.
     """
     browser = cloudscraper.create_scraper()
-    index_page = browser.get('https://kenpom.com/index.php')
-
-    # Print the login form to see current field names and any hidden fields
-    from bs4 import BeautifulSoup
-    soup = BeautifulSoup(index_page.text, 'html.parser')
-    form = soup.find('form')
-    print(f"  DEBUG - Login form found: {form is not None}")
-    if form:
-        print(f"  DEBUG - Form action: {form.get('action')}")
-        for inp in form.find_all('input'):
-            print(f"  DEBUG - Form field: name='{inp.get('name')}' type='{inp.get('type')}' value='{inp.get('value')}'")
+    browser.get('https://kenpom.com/index.php')
 
     form_data = {
         'email': email,
@@ -41,21 +31,14 @@ def login_kenpom(email: str, password: str):
         'submit': 'Login!',
     }
 
-    login_response = browser.post(
+    browser.post(
         'https://kenpom.com/handlers/login_handler.php',
         data=form_data,
         allow_redirects=True
     )
-    print(f"  DEBUG - Login POST status: {login_response.status_code}")
-    print(f"  DEBUG - Login POST response (first 300): {login_response.text[:300]}")
 
     home_page = browser.get('https://kenpom.com/')
     page_text = home_page.text.lower()
-
-    print(f"  DEBUG - Home page status: {home_page.status_code}")
-    print(f"  DEBUG - Page contains 'logout': {'logout' in page_text}")
-    print(f"  DEBUG - Page contains 'logged in': {'logged in' in page_text}")
-    print(f"  DEBUG - Page contains 'login' form: {'name=\"password\"' in home_page.text}")
 
     authenticated = any(s in page_text for s in ['logout', 'log out', 'sign out', 'logged in'])
     if not authenticated and 'name="password"' in home_page.text:
