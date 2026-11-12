@@ -526,7 +526,7 @@ def calculate_matchup_features(home_team, away_team, team_stats, neutral_site=Fa
     return features
 
 
-def predict_game(home_team, away_team, features):
+def predict_game(home_team, away_team, features, national_avg=106.0):
     """
     Predict game outcome using efficiency-based model
 
@@ -558,8 +558,6 @@ def predict_game(home_team, away_team, features):
     win_prob = 1 / (1 + 2.718 ** (-0.03 * net_advantage))
 
     # KenPom methodology: expected score = (team_OE * opp_DE / national_avg) * (possessions / 100)
-    # national_avg ~106 (current D1 average efficiency); tempo = avg of two teams' adjusted tempos
-    national_avg = 106.0
     expected_tempo = features['expected_tempo']
     predicted_home_score = (features['home_oe'] / national_avg) * (features['away_de'] / national_avg) * national_avg * (expected_tempo / 100) + features['home_court_advantage']
     predicted_away_score = (features['away_oe'] / national_avg) * (features['home_de'] / national_avg) * national_avg * (expected_tempo / 100)
@@ -781,6 +779,9 @@ def main(date=None):
         print("\nCould not load team statistics.")
         return
 
+    national_avg = team_stats['adj_offensive_efficiency'].mean()
+    print(f"  National avg OE: {national_avg:.2f}")
+
     # Generate predictions for each game
     print("\n" + "="*80)
     print("GENERATING PREDICTIONS")
@@ -813,7 +814,7 @@ def main(date=None):
         features = calculate_matchup_features(home_team, away_team, team_stats, neutral_site=neutral_site)
 
         # Predict
-        prediction = predict_game(home_team, away_team, features)
+        prediction = predict_game(home_team, away_team, features, national_avg)
 
         # Calculate cover pick (Against The Spread)
         predicted_margin = prediction['predicted_home_score'] - prediction['predicted_away_score']
