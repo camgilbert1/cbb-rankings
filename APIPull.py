@@ -213,7 +213,6 @@ def rebuild_gold_table(year=2027):
     print("\nChecking gold_team_rankings table...")
 
     try:
-        from datetime import date
         connection = sql.connect(
             server_hostname=host,
             http_path=http_path,
@@ -221,20 +220,6 @@ def rebuild_gold_table(year=2027):
             _socket_timeout=900
         )
         cursor = connection.cursor()
-
-        # Skip rebuild if already done this week (KenPom data doesn't change daily)
-        try:
-            cursor.execute("SELECT MAX(loaded_at) FROM workspace.default_gold.gold_team_rankings")
-            row = cursor.fetchone()
-            if row and row[0] and hasattr(row[0], 'date'):
-                days_since_rebuild = (date.today() - row[0].date()).days
-                if days_since_rebuild < 2:
-                    print(f"✓ gold_team_rankings rebuilt {days_since_rebuild} day(s) ago, skipping")
-                    cursor.close()
-                    connection.close()
-                    return
-        except Exception:
-            pass  # Table doesn't exist yet, proceed with rebuild
 
         print("  Rebuilding gold_team_rankings...")
         cursor.execute(f"""
