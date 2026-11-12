@@ -343,7 +343,8 @@ def upload_bracket_predictions(records):
         connection = sql.connect(
             server_hostname=DATABRICKS_HOST,
             http_path=DATABRICKS_HTTP_PATH,
-            access_token=DATABRICKS_TOKEN
+            access_token=DATABRICKS_TOKEN,
+            _socket_timeout=900
         )
         cursor = connection.cursor()
 
