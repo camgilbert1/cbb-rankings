@@ -713,8 +713,10 @@ if df is not None:
                     lambda x: 'W' if x == 1 else ('L' if x == 0 else '—')
                 )
 
+                log['Cover Pick'] = log['cover_pick']
+
                 display_log = log[['Date', 'Matchup', 'Conf', 'Predicted', 'Actual', 'SU',
-                                   'Win %', 'Pred Margin', 'Actual Margin', 'Error', 'ATS']]
+                                   'Win %', 'Pred Margin', 'Actual Margin', 'Error', 'Cover Pick', 'ATS']]
 
                 st.dataframe(display_log, use_container_width=True, hide_index=True,
                              height=min(600, len(display_log) * 35 + 38))
