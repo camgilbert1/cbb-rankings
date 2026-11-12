@@ -148,6 +148,118 @@ def store_results_to_databricks(results_df):
         print(f"❌ Error uploading results: {e}")
 
 
+def update_prediction_outcomes():
+    """
+    Materialize prediction outcomes by joining prediction_history with game_results.
+    Writes one row per completed game with KenPom features + actual result + W/L flags.
+    Used as training data for the neural network model.
+    """
+    print("\nUpdating prediction outcomes...")
+
+    try:
+        connection = sql.connect(
+            server_hostname=DATABRICKS_HOST,
+            http_path=DATABRICKS_HTTP_PATH,
+            access_token=DATABRICKS_TOKEN
+        )
+        cursor = connection.cursor()
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS workspace.default.prediction_outcomes (
+                game_date DATE,
+                home_team STRING,
+                away_team STRING,
+                home_adj_em DOUBLE,
+                away_adj_em DOUBLE,
+                home_oe DOUBLE,
+                away_oe DOUBLE,
+                home_de DOUBLE,
+                away_de DOUBLE,
+                home_rank INT,
+                away_rank INT,
+                predicted_winner STRING,
+                predicted_home_score DOUBLE,
+                predicted_away_score DOUBLE,
+                predicted_margin DOUBLE,
+                win_probability DOUBLE,
+                confidence STRING,
+                vegas_spread DOUBLE,
+                cover_pick STRING,
+                actual_home_score INT,
+                actual_away_score INT,
+                actual_margin INT,
+                actual_winner STRING,
+                su_correct INT,
+                ats_correct INT,
+                margin_error DOUBLE,
+                recorded_at TIMESTAMP
+            )
+            USING DELTA
+        """)
+
+        # Insert only newly completed games not already in prediction_outcomes
+        cursor.execute("""
+            INSERT INTO workspace.default.prediction_outcomes
+            SELECT
+                p.game_date,
+                p.home_team,
+                p.away_team,
+                p.home_adj_em,
+                p.away_adj_em,
+                p.home_oe,
+                p.away_oe,
+                p.home_de,
+                p.away_de,
+                p.home_rank,
+                p.away_rank,
+                p.predicted_winner,
+                p.predicted_home_score,
+                p.predicted_away_score,
+                (p.predicted_home_score - p.predicted_away_score) AS predicted_margin,
+                p.win_probability,
+                p.confidence,
+                p.vegas_spread,
+                p.cover_pick,
+                r.home_score AS actual_home_score,
+                r.away_score AS actual_away_score,
+                (r.home_score - r.away_score) AS actual_margin,
+                CASE WHEN r.home_score > r.away_score THEN p.home_team ELSE p.away_team END AS actual_winner,
+                CASE WHEN p.predicted_winner =
+                     CASE WHEN r.home_score > r.away_score THEN p.home_team ELSE p.away_team END
+                     THEN 1 ELSE 0 END AS su_correct,
+                CASE
+                    WHEN p.vegas_spread = 0 THEN NULL
+                    WHEN (p.predicted_home_score - p.predicted_away_score + p.vegas_spread) > 0
+                         AND (r.home_score - r.away_score + p.vegas_spread) > 0 THEN 1
+                    WHEN (p.predicted_home_score - p.predicted_away_score + p.vegas_spread) <= 0
+                         AND (r.home_score - r.away_score + p.vegas_spread) < 0 THEN 1
+                    ELSE 0
+                END AS ats_correct,
+                ((p.predicted_home_score - p.predicted_away_score) - (r.home_score - r.away_score)) AS margin_error,
+                current_timestamp() AS recorded_at
+            FROM workspace.default.prediction_history p
+            INNER JOIN workspace.default.game_results r
+                ON p.home_team = r.home_team
+                AND p.away_team = r.away_team
+                AND ABS(DATEDIFF(p.game_date, r.game_date)) <= 1
+            WHERE NOT EXISTS (
+                SELECT 1 FROM workspace.default.prediction_outcomes o
+                WHERE o.home_team = p.home_team
+                  AND o.away_team = p.away_team
+                  AND o.game_date = p.game_date
+            )
+        """)
+
+        cursor.execute("SELECT COUNT(*) FROM workspace.default.prediction_outcomes")
+        total = cursor.fetchone()[0]
+        cursor.close()
+        connection.close()
+        print(f"✓ prediction_outcomes updated ({total} total rows)")
+
+    except Exception as e:
+        print(f"❌ Error updating prediction outcomes: {e}")
+
+
 def main():
     """Main execution function"""
 
@@ -201,6 +313,8 @@ def main():
 
     if not (DATABRICKS_HOST and DATABRICKS_HTTP_PATH and DATABRICKS_TOKEN):
         print("\n⚠️  Databricks credentials not found. Results not uploaded.")
+    else:
+        update_prediction_outcomes()
 
     print("\n" + "="*80)
     print(f"✅ Results update completed successfully!")
