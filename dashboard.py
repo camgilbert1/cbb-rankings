@@ -284,13 +284,12 @@ with st.spinner("Loading rankings..."):
 if df is not None:
     # Show last updated time
     if 'loaded_at' in df.columns and len(df) > 0:
-        last_updated_utc = df['loaded_at'].iloc[0]
-        # Convert from UTC to Eastern Time
-        eastern = pytz.timezone('US/Eastern')
-        if last_updated_utc.tzinfo is None:
-            last_updated_utc = pytz.utc.localize(last_updated_utc)
-        last_updated_et = last_updated_utc.astimezone(eastern)
-        st.caption(f"📅 Last updated: {last_updated_et.strftime('%B %d, %Y at %I:%M %p ET')}")
+        try:
+            eastern = pytz.timezone('US/Eastern')
+            last_updated_et = pd.to_datetime(df['loaded_at'].iloc[0], utc=True).astimezone(eastern)
+            st.caption(f"📅 Last updated: {last_updated_et.strftime('%B %d, %Y at %I:%M %p ET')}")
+        except Exception:
+            st.caption(f"📅 Last updated: {str(df['loaded_at'].iloc[0])[:19]}")
 
     # Sidebar filters
     st.sidebar.header("⚙️ Settings")
