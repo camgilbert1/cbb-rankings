@@ -23,7 +23,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install kenpompy requests databricks-sql-connector pandas pyarrow python-dotenv pytz beautifulsoup4 cloudscraper
+          pip install kenpompy requests databricks-sql-connector pandas pyarrow python-dotenv pytz beautifulsoup4 cloudscraper xgboost scikit-learn numpy
 
       - name: Refresh KenPom data and rebuild gold table
         timeout-minutes: 20
@@ -52,9 +52,18 @@ jobs:
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
         run: python UpdateResults.py
 
+      - name: Retrain ML model and generate predictions
+        timeout-minutes: 30
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_HTTP_PATH: ${{ secrets.DATABRICKS_HTTP_PATH }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+        run: python TrainModel.py
+
       - name: Summary
         run: |
           echo "✅ Pipeline complete"
           echo "📊 KenPom data refreshed (gold table rebuilds every 3 days)"
           echo "🎯 Game predictions generated"
           echo "📈 Game results updated"
+          echo "🤖 ML model retrained"
