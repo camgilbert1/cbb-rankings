@@ -1107,9 +1107,14 @@ if df is not None:
                     return '—'
                 edge = row['ml_predicted_margin'] + s
                 if edge > 0:
-                    return f"{row['home_team']} {s:.1f}"
+                    # home covers — s is their spread (negative if favored, positive if dog)
+                    spread_str = f"{s:.1f}" if s < 0 else f"+{s:.1f}"
+                    return f"{row['home_team']} {spread_str}"
                 else:
-                    return f"{row['away_team']} +{abs(s):.1f}"
+                    # away covers — their spread is -s
+                    away_spread = -s
+                    spread_str = f"{away_spread:.1f}" if away_spread < 0 else f"+{away_spread:.1f}"
+                    return f"{row['away_team']} {spread_str}"
 
             def ats_edge(row):
                 s = row.get('vegas_spread')
