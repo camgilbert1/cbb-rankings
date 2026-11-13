@@ -262,6 +262,70 @@ def update_prediction_outcomes():
         print(f"❌ Error updating prediction outcomes: {e}")
 
 
+def update_ml_ats_results():
+    """Fill in actual scores and ATS result for completed games in ml_predictions."""
+    print("\nUpdating ML ATS results...")
+    try:
+        connection = sql.connect(
+            server_hostname=DATABRICKS_HOST,
+            http_path=DATABRICKS_HTTP_PATH,
+            access_token=DATABRICKS_TOKEN,
+            _socket_timeout=900
+        )
+        cursor = connection.cursor()
+
+        cursor.execute("""
+            SELECT m.game_date, m.home_team, m.away_team,
+                   m.ml_predicted_margin, m.vegas_spread,
+                   r.home_score, r.away_score
+            FROM workspace.default.ml_predictions m
+            JOIN workspace.default.game_results r
+                ON m.home_team = r.home_team
+               AND m.away_team = r.away_team
+               AND m.game_date = r.game_date
+            WHERE m.actual_home_score IS NULL
+              AND r.home_score IS NOT NULL
+        """)
+        rows = cursor.fetchall()
+
+        updated = 0
+        for row in rows:
+            game_date, home, away, pred_margin, spread, actual_home, actual_away = row
+            actual_margin = actual_home - actual_away
+
+            if spread and spread != 0:
+                ml_pick_home     = (pred_margin + spread) > 0
+                actual_home_covers = (actual_margin + spread) > 0
+                if (actual_margin + spread) == 0:
+                    ats_correct = None  # push
+                else:
+                    ats_correct = 1 if ml_pick_home == actual_home_covers else 0
+            else:
+                ats_correct = None
+
+            home_esc = home.replace("'", "''")
+            away_esc = away.replace("'", "''")
+            ats_val  = str(ats_correct) if ats_correct is not None else 'NULL'
+
+            cursor.execute(f"""
+                UPDATE workspace.default.ml_predictions
+                SET actual_home_score = {actual_home},
+                    actual_away_score = {actual_away},
+                    ml_ats_correct = {ats_val}
+                WHERE home_team = '{home_esc}'
+                  AND away_team = '{away_esc}'
+                  AND game_date = '{game_date}'
+            """)
+            updated += 1
+
+        cursor.close()
+        connection.close()
+        print(f"  Updated ML ATS results for {updated} games")
+
+    except Exception as e:
+        print(f"  Error updating ML ATS results: {e}")
+
+
 def main():
     """Main execution function"""
 
@@ -317,6 +381,7 @@ def main():
         print("\n⚠️  Databricks credentials not found. Results not uploaded.")
     else:
         update_prediction_outcomes()
+        update_ml_ats_results()
 
     print("\n" + "="*80)
     print(f"✅ Results update completed successfully!")
