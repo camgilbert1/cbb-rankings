@@ -712,11 +712,16 @@ if df is not None:
                 log['ATS'] = log['ats_correct'].apply(
                     lambda x: 'W' if x == 1 else ('L' if x == 0 else '—')
                 )
-
                 log['Cover Pick'] = log['cover_pick']
 
-                display_log = log[['Date', 'Matchup', 'Conf', 'Predicted', 'Actual', 'SU',
-                                   'Win %', 'Pred Margin', 'Actual Margin', 'Error', 'Cover Pick', 'ATS']]
+                # Sort: ATS Ws first, then Ls, then no-spread; newest games first within each group
+                ats_sort = {'W': 0, 'L': 1, '—': 2}
+                log['ats_sort'] = log['ATS'].map(ats_sort).fillna(2)
+                log = log.sort_values(['ats_sort', 'game_date'], ascending=[True, False])
+
+                display_log = log[['ATS', 'SU', 'Date', 'Matchup', 'Conf',
+                                   'Predicted', 'Win %', 'Actual',
+                                   'Pred Margin', 'Actual Margin', 'Error', 'Cover Pick']]
 
                 st.dataframe(display_log, use_container_width=True, hide_index=True,
                              height=min(600, len(display_log) * 35 + 38))
