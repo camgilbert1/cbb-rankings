@@ -390,17 +390,13 @@ def load_ml_predictions():
         today = pd.Timestamp.now(tz=eastern).strftime('%Y-%m-%d')
         cursor = connection.cursor()
         cursor.execute(f"""
-            SELECT m.home_team, m.away_team, m.game_date,
-                   m.ml_predicted_home_score, m.ml_predicted_away_score,
-                   m.ml_predicted_margin, m.ml_predicted_total,
-                   m.ml_win_probability, m.model_version, m.generated_at,
-                   p.vegas_spread
-            FROM workspace.default.ml_predictions m
-            LEFT JOIN workspace.default.prediction_history p
-                ON m.home_team = p.home_team
-               AND m.away_team = p.away_team
-               AND m.game_date = p.game_date
-            WHERE m.game_date = '{today}'
+            SELECT home_team, away_team, game_date,
+                   ml_predicted_home_score, ml_predicted_away_score,
+                   ml_predicted_margin, ml_predicted_total,
+                   ml_win_probability, model_version, generated_at,
+                   vegas_spread, ats_confidence
+            FROM workspace.default.ml_predictions
+            WHERE game_date = '{today}'
         """)
         df_ml = cursor.fetchall_arrow().to_pandas()
         cursor.close()
@@ -408,6 +404,33 @@ def load_ml_predictions():
         return df_ml
     except Exception:
         return pd.DataFrame()
+
+
+@st.cache_data(ttl=1800)
+def load_ml_performance():
+    try:
+        connection = sql.connect(
+            server_hostname=st.secrets.get("DATABRICKS_HOST", os.getenv("DATABRICKS_HOST")),
+            http_path=st.secrets.get("DATABRICKS_HTTP_PATH", os.getenv("DATABRICKS_HTTP_PATH")),
+            access_token=st.secrets.get("DATABRICKS_TOKEN", os.getenv("DATABRICKS_TOKEN")),
+            _socket_timeout=900
+        )
+        cursor = connection.cursor()
+        cursor.execute("""
+            SELECT ats_confidence,
+                   COUNT(*) AS total,
+                   SUM(ml_ats_correct) AS wins
+            FROM workspace.default.ml_predictions
+            WHERE ml_ats_correct IS NOT NULL
+              AND ats_confidence IS NOT NULL
+            GROUP BY ats_confidence
+        """)
+        rows = cursor.fetchall()
+        cursor.close()
+        connection.close()
+        return {r[0]: {'total': int(r[1]), 'wins': int(r[2]), 'losses': int(r[1]) - int(r[2])} for r in rows}
+    except Exception:
+        return {}
 
 
 @st.cache_data(ttl=1800)
@@ -1057,8 +1080,24 @@ if df is not None:
                     "Predicts margin and total score separately.*")
 
         with st.spinner("Loading ML predictions..."):
-            ml_preds = load_ml_predictions()
-            metadata = load_model_metadata()
+            ml_preds   = load_ml_predictions()
+            metadata   = load_model_metadata()
+            ml_perf    = load_ml_performance()
+
+        # ATS record by confidence
+        if ml_perf:
+            st.markdown("### ATS Record by Confidence")
+            col1, col2, col3 = st.columns(3)
+            for col_widget, conf, emoji in [(col1, 'High', '🟢'), (col2, 'Medium', '🟡'), (col3, 'Low', '🔴')]:
+                with col_widget:
+                    if conf in ml_perf:
+                        p = ml_perf[conf]
+                        pct = p['wins'] / p['total'] * 100 if p['total'] > 0 else 0
+                        st.metric(f"{emoji} {conf}", f"{p['wins']}-{p['losses']} ({pct:.0f}%)",
+                                  delta=f"{p['total']} games tracked")
+                    else:
+                        st.metric(f"{emoji} {conf}", "0-0", delta="no games yet")
+            st.markdown("---")
 
         # Model metadata cards
         if metadata:
