@@ -7,6 +7,7 @@ Fetches current college basketball rankings from multiple sources:
 """
 
 import pandas as pd
+import requests
 import cloudscraper
 import kenpompy as kenpompy
 from kenpompy.summary import get_efficiency
@@ -197,6 +198,152 @@ def upload_to_databricks(df, table_name, year):
         print(f"   CSV file saved locally as backup.")
 
 
+def fetch_torvik_ratings(year=2027):
+    """
+    Fetch T-Rank ratings from barttorvik.com (free JSON API, no login required).
+
+    Args:
+        year (int): Season year (e.g., 2027 for 2026-27 season)
+
+    Returns:
+        pd.DataFrame: Torvik ratings with team_name, barthag, adj_o, adj_d, adj_t, four factors
+    """
+    print(f"Fetching Torvik T-Rank ratings for {year}...")
+
+    try:
+        url = f"https://barttorvik.com/trank.php?year={year}&json=1"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+
+        data = response.json()
+        if not data:
+            print(f"  No Torvik data returned for {year}")
+            return pd.DataFrame()
+
+        first = data[0]
+
+        if isinstance(first, dict):
+            df = pd.DataFrame(data)
+            rename_map = {
+                'team': 'team_name', 'conf': 'conference', 'g': 'games',
+                'barthag': 'barthag', 'adjoe': 'adj_o', 'adjde': 'adj_d', 'adjte': 'adj_t',
+                'efg_o': 'efg_o', 'efg_d': 'efg_d',
+                'tor': 'tov_o', 'tord': 'tov_d',
+                'orb': 'orb', 'drb': 'drb', 'ftr': 'ftr', 'ftrd': 'ftrd', 'wab': 'wab',
+            }
+            df = df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
+        else:
+            # list-of-lists format — positional mapping
+            torvik_cols = [
+                'rk', 'team_name', 'conference', 'games', 'record',
+                'barthag', 'adj_o', 'adj_d', 'adj_t',
+                'efg_o', 'efg_d', 'tov_o', 'tov_d',
+                'orb', 'drb', 'ftr', 'ftrd',
+                'two_p_o', 'two_p_d', 'three_p_o', 'three_p_d', 'wab',
+            ]
+            n = len(first)
+            cols = torvik_cols[:n] if n <= len(torvik_cols) else torvik_cols + [f'x{i}' for i in range(n - len(torvik_cols))]
+            df = pd.DataFrame(data, columns=cols)
+
+        df['season'] = year
+
+        keep = ['team_name', 'conference', 'season', 'games',
+                'barthag', 'adj_o', 'adj_d', 'adj_t',
+                'efg_o', 'efg_d', 'tov_o', 'tov_d',
+                'orb', 'drb', 'ftr', 'ftrd', 'wab']
+        available = [c for c in keep if c in df.columns]
+        df = df[available].copy()
+
+        for col in df.columns:
+            if col not in ('team_name', 'conference', 'record'):
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+
+        # Drop any header rows that leaked through
+        df = df[df['team_name'].notna() & ~df['team_name'].str.upper().eq('TEAM')].copy()
+        df = df.reset_index(drop=True)
+
+        print(f"  Fetched Torvik ratings for {len(df)} teams ({year})")
+        return df
+
+    except Exception as e:
+        print(f"  Error fetching Torvik ratings for {year}: {e}")
+        return pd.DataFrame()
+
+
+def upload_torvik_to_databricks(df, year):
+    """
+    Upload Torvik ratings DataFrame to Databricks, replacing any existing table for that year.
+
+    Args:
+        df (pd.DataFrame): Torvik ratings from fetch_torvik_ratings()
+        year (int): Season year used for table naming
+    """
+    host = os.getenv("DATABRICKS_HOST")
+    http_path = os.getenv("DATABRICKS_HTTP_PATH")
+    token = os.getenv("DATABRICKS_TOKEN")
+
+    if not all([host, http_path, token]):
+        print("  Databricks credentials not found. Skipping Torvik upload.")
+        return
+
+    table_name = f"workspace.default.torvik_ratings_{year}"
+    print(f"\nUploading Torvik ratings to {table_name}...")
+
+    try:
+        connection = sql.connect(
+            server_hostname=host,
+            http_path=http_path,
+            access_token=token,
+            _socket_timeout=900
+        )
+        cursor = connection.cursor()
+
+        df_clean = df.copy()
+        df_clean.columns = [c.replace('-', '_').replace('.', '_').replace(' ', '_') for c in df_clean.columns]
+
+        columns = []
+        for col in df_clean.columns:
+            dtype = df_clean[col].dtype
+            if dtype == 'object':
+                sql_type = 'STRING'
+            elif dtype == 'int64':
+                sql_type = 'BIGINT'
+            else:
+                sql_type = 'DOUBLE'
+            columns.append(f"`{col}` {sql_type}")
+
+        cursor.execute(f"DROP TABLE IF EXISTS {table_name}")
+        cursor.execute(f"""
+            CREATE TABLE {table_name} (
+                {', '.join(columns)}
+            ) USING DELTA
+        """)
+
+        batch_size = 100
+        for i in range(0, len(df_clean), batch_size):
+            batch = df_clean.iloc[i:i+batch_size]
+            values_list = []
+            for _, row in batch.iterrows():
+                parts = []
+                for val in row:
+                    if pd.isna(val):
+                        parts.append('NULL')
+                    elif isinstance(val, str):
+                        parts.append(f"'{val.replace(chr(39), chr(39)*2)}'")
+                    else:
+                        parts.append(str(val))
+                values_list.append(f"({', '.join(parts)})")
+            cursor.execute(f"INSERT INTO {table_name} VALUES {', '.join(values_list)}")
+
+        cursor.close()
+        connection.close()
+        print(f"  Uploaded {len(df_clean)} teams to {table_name}")
+
+    except Exception as e:
+        print(f"  Error uploading Torvik ratings: {e}")
+
+
 def rebuild_gold_table(year=2027):
     """
     Rebuild the gold_team_rankings table directly from raw KenPom data.
@@ -284,6 +431,14 @@ def main():
     upload_to_databricks(kenpom_data, "kenpom_ratings", 2027)
     rebuild_gold_table(year=2027)
 
+    # 2. Torvik T-Rank (ML FEATURE SOURCE - free API, no login)
+    torvik_data = fetch_torvik_ratings(year=2027)
+    if not torvik_data.empty:
+        torvik_file = "torvik_ratings_2027.csv"
+        torvik_data.to_csv(torvik_file, index=False)
+        print(f"\n✓ Torvik data saved to: {torvik_file}")
+        upload_torvik_to_databricks(torvik_data, 2027)
+
     # =============================================================================
     # SUMMARY
     # =============================================================================
@@ -292,6 +447,7 @@ def main():
     print("DATA COLLECTION SUMMARY:")
     print("="*80)
     print(f"KenPom Teams: {len(kenpom_data)}")
+    print(f"Torvik Teams: {len(torvik_data) if not torvik_data.empty else 0}")
     print("\nData sources fetched successfully!")
 
     return kenpom_data
