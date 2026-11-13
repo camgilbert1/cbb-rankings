@@ -689,12 +689,8 @@ if df is not None:
         for col in numeric_cols:
             display_df[col] = display_df[col].round(1)
 
-        st.dataframe(
-            display_df,
-            use_container_width=True,
-            hide_index=True,
-            height=600
-        )
+        html, height = render_scoreboard_table(display_df)
+        components.html(html, height=height, scrolling=True)
 
         # Download button
         csv = display_df.to_csv(index=False).encode('utf-8')
@@ -976,8 +972,8 @@ if df is not None:
                                    'Actual', 'Predicted', 'Score', 'Cover Pick',
                                    'Win %', 'Pred Margin', 'Actual Margin', 'Error']]
 
-                st.dataframe(display_log, use_container_width=True, hide_index=True,
-                             height=min(600, len(display_log) * 35 + 38))
+                html, height = render_scoreboard_table(display_log)
+                components.html(html, height=height, scrolling=True)
         else:
             st.info("No completed games with predictions yet. Performance tracking will begin after games are played!")
 
