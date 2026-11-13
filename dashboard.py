@@ -730,9 +730,9 @@ if df is not None:
                 log['ats_sort'] = log['ATS'].map(ats_sort).fillna(2)
                 log = log.sort_values(['ats_sort', 'game_date'], ascending=[True, False])
 
-                display_log = log[['ATS', 'SU', 'Date', 'Matchup', 'Score', 'Conf',
-                                   'Predicted', 'Win %', 'Actual',
-                                   'Pred Margin', 'Actual Margin', 'Error', 'Cover Pick']]
+                display_log = log[['ATS', 'SU', 'Conf', 'Date', 'Matchup',
+                                   'Actual', 'Predicted', 'Score', 'Cover Pick',
+                                   'Win %', 'Pred Margin', 'Actual Margin', 'Error']]
 
                 st.dataframe(display_log, use_container_width=True, hide_index=True,
                              height=min(600, len(display_log) * 35 + 38))
