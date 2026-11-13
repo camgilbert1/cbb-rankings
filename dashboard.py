@@ -389,13 +389,18 @@ def load_ml_predictions():
         today = pd.Timestamp.now(tz=eastern).strftime('%Y-%m-%d')
         cursor = connection.cursor()
         cursor.execute(f"""
-            SELECT home_team, away_team, game_date,
-                   ml_predicted_home_score, ml_predicted_away_score,
-                   ml_predicted_margin, ml_predicted_total,
-                   ml_win_probability, model_version, generated_at
-            FROM workspace.default.ml_predictions
-            WHERE game_date = '{today}'
-            ORDER BY ABS(ml_predicted_margin) DESC
+            SELECT m.home_team, m.away_team, m.game_date,
+                   m.ml_predicted_home_score, m.ml_predicted_away_score,
+                   m.ml_predicted_margin, m.ml_predicted_total,
+                   m.ml_win_probability, m.model_version, m.generated_at,
+                   p.vegas_spread
+            FROM workspace.default.ml_predictions m
+            LEFT JOIN workspace.default.prediction_history p
+                ON m.home_team = p.home_team
+               AND m.away_team = p.away_team
+               AND m.game_date = p.game_date
+            WHERE m.game_date = '{today}'
+            ORDER BY ABS(m.ml_predicted_margin) DESC
         """)
         df_ml = cursor.fetchall_arrow().to_pandas()
         cursor.close()
@@ -1093,7 +1098,25 @@ if df is not None:
             display['Total']  = display['ml_predicted_total'].apply(lambda x: f"{x:.0f}")
             display['Win %']  = display['ml_win_probability'].apply(lambda x: f"{x:.0%}")
 
-            show_cols = ['Matchup', 'ML Winner', 'Win %', 'Pred Score', 'Margin', 'Total']
+            def fmt_spread(row):
+                s = row.get('vegas_spread')
+                if s is None or pd.isna(s) or s == 0:
+                    return '—'
+                return f"{row['home_team']} {s:.1f}" if s < 0 else f"{row['away_team']} -{s:.1f}"
+
+            def ml_ats_pick(row):
+                s = row.get('vegas_spread')
+                if s is None or pd.isna(s) or s == 0:
+                    return '—'
+                # edge > 0 means ML thinks home covers
+                edge = row['ml_predicted_margin'] + s
+                cover_team = row['home_team'] if edge > 0 else row['away_team']
+                return f"{cover_team} ({edge:+.1f})"
+
+            display['Spread']       = display.apply(fmt_spread, axis=1)
+            display['ML ATS Pick']  = display.apply(ml_ats_pick, axis=1)
+
+            show_cols = ['Matchup', 'Spread', 'ML ATS Pick', 'ML Winner', 'Win %', 'Pred Score', 'Margin', 'Total']
             html, height = render_scoreboard_table(display[show_cols])
             components.html(html, height=height, scrolling=True)
 
