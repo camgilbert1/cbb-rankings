@@ -1119,6 +1119,16 @@ if df is not None:
             display['Spread']       = display.apply(fmt_spread, axis=1)
             display['ML ATS Pick']  = display.apply(ml_ats_pick, axis=1)
 
+            # Sort: games with spreads by ATS edge desc, then no-spread games by predicted margin desc
+            def ats_edge(row):
+                s = row.get('vegas_spread')
+                if s is None or pd.isna(s) or s == 0:
+                    return -1
+                return abs(row['ml_predicted_margin'] + s)
+
+            display['_edge'] = display.apply(ats_edge, axis=1)
+            display = display.sort_values('_edge', ascending=False).drop(columns='_edge')
+
             show_cols = ['Matchup', 'Spread', 'ML ATS Pick', 'ML Winner', 'Win %', 'Pred Score', 'Margin', 'Total']
             html, height = render_scoreboard_table(display[show_cols])
             components.html(html, height=height, scrolling=True)
