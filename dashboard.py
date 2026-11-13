@@ -376,6 +376,59 @@ def load_performance(time_period):
         return {}
 
 
+@st.cache_data(ttl=1800)
+def load_ml_predictions():
+    try:
+        connection = sql.connect(
+            server_hostname=st.secrets.get("DATABRICKS_HOST", os.getenv("DATABRICKS_HOST")),
+            http_path=st.secrets.get("DATABRICKS_HTTP_PATH", os.getenv("DATABRICKS_HTTP_PATH")),
+            access_token=st.secrets.get("DATABRICKS_TOKEN", os.getenv("DATABRICKS_TOKEN")),
+            _socket_timeout=900
+        )
+        eastern = pytz.timezone('US/Eastern')
+        today = pd.Timestamp.now(tz=eastern).strftime('%Y-%m-%d')
+        cursor = connection.cursor()
+        cursor.execute(f"""
+            SELECT home_team, away_team, game_date,
+                   ml_predicted_home_score, ml_predicted_away_score,
+                   ml_predicted_margin, ml_predicted_total,
+                   ml_win_probability, model_version, generated_at
+            FROM workspace.default.ml_predictions
+            WHERE game_date = '{today}'
+            ORDER BY ABS(ml_predicted_margin) DESC
+        """)
+        df_ml = cursor.fetchall_arrow().to_pandas()
+        cursor.close()
+        connection.close()
+        return df_ml
+    except Exception:
+        return pd.DataFrame()
+
+
+@st.cache_data(ttl=1800)
+def load_model_metadata():
+    try:
+        connection = sql.connect(
+            server_hostname=st.secrets.get("DATABRICKS_HOST", os.getenv("DATABRICKS_HOST")),
+            http_path=st.secrets.get("DATABRICKS_HTTP_PATH", os.getenv("DATABRICKS_HTTP_PATH")),
+            access_token=st.secrets.get("DATABRICKS_TOKEN", os.getenv("DATABRICKS_TOKEN")),
+            _socket_timeout=900
+        )
+        cursor = connection.cursor()
+        cursor.execute("""
+            SELECT model_name, model_version, training_games,
+                   xgb_cv_rmse, ridge_cv_rmse, season_weights, created_at
+            FROM workspace.default.ml_models
+            WHERE model_name IN ('margin_model', 'total_model')
+        """)
+        rows = cursor.fetchall()
+        cursor.close()
+        connection.close()
+        return {row[0]: row for row in rows}
+    except Exception:
+        return {}
+
+
 @st.cache_data(ttl=3600)  # Cache for 1 hour (bracket updates Tues/Fri only)
 def load_bracket_predictions():
     """Load bracket predictions from Databricks"""
@@ -998,57 +1051,9 @@ if df is not None:
         st.markdown("*Trained nightly on 3+ seasons of KenPom efficiency data. "
                     "Predicts margin and total score separately.*")
 
-        @st.cache_data(ttl=3600)
-        def load_ml_predictions():
-            try:
-                connection = sql.connect(
-                    server_hostname=st.secrets.get("DATABRICKS_HOST", os.getenv("DATABRICKS_HOST")),
-                    http_path=st.secrets.get("DATABRICKS_HTTP_PATH", os.getenv("DATABRICKS_HTTP_PATH")),
-                    access_token=st.secrets.get("DATABRICKS_TOKEN", os.getenv("DATABRICKS_TOKEN")),
-                    _socket_timeout=900
-                )
-                cursor = connection.cursor()
-                cursor.execute("""
-                    SELECT home_team, away_team, game_date,
-                           ml_predicted_home_score, ml_predicted_away_score,
-                           ml_predicted_margin, ml_predicted_total,
-                           ml_win_probability, model_version, generated_at
-                    FROM workspace.default.ml_predictions
-                    WHERE game_date = current_date()
-                    ORDER BY ABS(ml_predicted_margin) DESC
-                """)
-                df_ml = cursor.fetchall_arrow().to_pandas()
-                cursor.close()
-                connection.close()
-                return df_ml
-            except Exception:
-                return pd.DataFrame()
-
-        @st.cache_data(ttl=3600)
-        def load_model_metadata():
-            try:
-                connection = sql.connect(
-                    server_hostname=st.secrets.get("DATABRICKS_HOST", os.getenv("DATABRICKS_HOST")),
-                    http_path=st.secrets.get("DATABRICKS_HTTP_PATH", os.getenv("DATABRICKS_HTTP_PATH")),
-                    access_token=st.secrets.get("DATABRICKS_TOKEN", os.getenv("DATABRICKS_TOKEN")),
-                    _socket_timeout=900
-                )
-                cursor = connection.cursor()
-                cursor.execute("""
-                    SELECT model_name, model_version, training_games,
-                           xgb_cv_rmse, ridge_cv_rmse, season_weights, created_at
-                    FROM workspace.default.ml_models
-                    WHERE model_name IN ('margin_model', 'total_model')
-                """)
-                rows = cursor.fetchall()
-                cursor.close()
-                connection.close()
-                return {row[0]: row for row in rows}
-            except Exception:
-                return {}
-
-        ml_preds = load_ml_predictions()
-        metadata = load_model_metadata()
+        with st.spinner("Loading ML predictions..."):
+            ml_preds = load_ml_predictions()
+            metadata = load_model_metadata()
 
         # Model metadata cards
         if metadata:
