@@ -775,11 +775,24 @@ if df is not None:
             )
 
             # Add ATS pick with confidence
-            display_predictions['ATS Pick'] = display_predictions['cover_pick']
+            display_predictions['Spread Pick'] = display_predictions['cover_pick']
 
-            display_predictions['ATS Conf.'] = display_predictions['cover_confidence'].apply(
+            display_predictions['Spread Conf'] = display_predictions['cover_confidence'].apply(
                 lambda x: f"{confidence_emoji.get(x, '⚪')} {x}"
             )
+
+            # Cover probability: logistic transform of (predicted margin - spread line)
+            # Scale of 8 pts → 0pt edge = 50%, 8pt edge ≈ 73%, 16pt edge ≈ 88%
+            import math
+            def cover_prob(row):
+                if pd.isna(row['predicted_home_score']) or pd.isna(row['predicted_away_score']) or row['vegas_spread'] == 0:
+                    return '-'
+                raw = (row['predicted_home_score'] - row['predicted_away_score']) + row['vegas_spread']
+                prob_home = 1 / (1 + math.exp(-raw / 8))
+                p = prob_home if row['cover_pick'] == row['home_team'] else 1 - prob_home
+                return f"{p:.0%}"
+
+            display_predictions['Spread Cover Prob %'] = display_predictions.apply(cover_prob, axis=1)
 
             # Calculate actual ATS result (if game is final)
             def get_ats_result(row):
@@ -807,8 +820,8 @@ if df is not None:
 
             # Select and display columns
             compact_df = display_predictions[[
-                'Date', 'Matchup', 'Spread', 'Prediction', 'Pred Score', 'Win %', 'Win Conf.',
-                'ATS Pick', 'ATS Conf.', 'Actual Winner', 'Actual ATS'
+                'Date', 'Matchup', 'Spread', 'Spread Pick', 'Spread Cover Prob %', 'Spread Conf',
+                'Prediction', 'Pred Score', 'Win %', 'Win Conf.', 'Actual Winner', 'Actual ATS'
             ]]
 
             html, height = render_scoreboard_table(compact_df)
