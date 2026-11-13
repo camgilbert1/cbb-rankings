@@ -280,6 +280,7 @@ def load_game_log(time_period):
                 ats_correct
             FROM workspace.default.prediction_outcomes
             WHERE su_correct IS NOT NULL
+              AND vegas_spread != 0
             {date_filter}
             ORDER BY game_date DESC, home_team
         """)
@@ -464,10 +465,10 @@ if df is not None:
     # =========================================================================
     with tab2:
         if not predictions_df.empty:
-            st.subheader(f"🎯 Game Predictions ({len(predictions_df)} games)")
+            st.subheader(f"🎯 Game Predictions ({len(predictions_df[predictions_df['vegas_spread'] != 0])} games)")
 
-            # Create compact display dataframe
-            display_predictions = predictions_df.copy()
+            # Create compact display dataframe — exclude games with no spread (non-D1 / no line)
+            display_predictions = predictions_df[predictions_df['vegas_spread'] != 0].copy()
 
             # Format date column
             display_predictions['Date'] = pd.to_datetime(display_predictions['game_date']).dt.strftime('%a %b %d').str.lstrip('0')
