@@ -1111,8 +1111,10 @@ if df is not None:
                     return '—'
                 # edge > 0 means ML thinks home covers
                 edge = row['ml_predicted_margin'] + s
-                cover_team = row['home_team'] if edge > 0 else row['away_team']
-                return f"{cover_team} ({edge:+.1f})"
+                if edge > 0:
+                    return f"{row['home_team']} (+{edge:.1f})"
+                else:
+                    return f"{row['away_team']} (+{abs(edge):.1f})"
 
             display['Spread']       = display.apply(fmt_spread, axis=1)
             display['ML ATS Pick']  = display.apply(ml_ats_pick, axis=1)
