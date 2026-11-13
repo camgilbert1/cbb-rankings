@@ -815,8 +815,8 @@ if df is not None:
 
             # Select and display columns
             compact_df = display_predictions[[
-                'Date', 'Matchup', 'Status', 'Spread', 'Prediction', 'Pred Score', 'Win %', 'Win Conf.',
-                'ATS Pick', 'ATS Conf.', 'Actual Score', 'Actual Winner', 'Actual ATS'
+                'Date', 'Matchup', 'Spread', 'Prediction', 'Pred Score', 'Win %', 'Win Conf.',
+                'ATS Pick', 'ATS Conf.', 'Actual Winner', 'Actual ATS'
             ]]
 
             html, height = render_matrix_table(compact_df)
