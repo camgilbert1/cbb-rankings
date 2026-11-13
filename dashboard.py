@@ -18,131 +18,187 @@ st.set_page_config(
     layout="wide"
 )
 
-# ── 90s retro theme ──────────────────────────────────────────────────────────
+# ── 90s Matrix / Windows terminal theme ──────────────────────────────────────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=VT323&family=Orbitron:wght@400;700;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
 
-/* Background */
+/* ── CRT black background with scanline overlay ── */
 [data-testid="stAppViewContainer"] {
-    background-color: #000011;
-    background-image:
-        radial-gradient(ellipse at top, #0d0d3b 0%, #000011 65%),
-        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'%3E%3Crect width='40' height='40' fill='none'/%3E%3Cpath d='M0 0h40v1H0zM0 0v40h1V0' stroke='%23ffffff08' stroke-width='1'/%3E%3C/svg%3E");
+    background-color: #0a0a0a;
+    background-image: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 3px,
+        rgba(0, 255, 65, 0.018) 3px,
+        rgba(0, 255, 65, 0.018) 4px
+    );
 }
 [data-testid="stHeader"] { background: transparent !important; }
 [data-testid="block-container"] { padding-top: 1.5rem; }
 
-/* Base font */
-html, body, [class*="css"], .stMarkdown, p, li, td, th, label, span {
-    font-family: 'VT323', monospace !important;
-    font-size: 18px !important;
-    color: #c8ffc8 !important;
+/* ── Base font — terminal monospace ── */
+html, body, [class*="css"], .stMarkdown, p, li, label, span, div {
+    font-family: 'Share Tech Mono', 'Courier New', monospace !important;
+    color: #00FF41 !important;
 }
 
-/* Page title */
+/* ── Page title ── */
 h1 {
-    font-family: 'Orbitron', sans-serif !important;
-    font-size: 2.4rem !important;
-    color: #FF00FF !important;
-    text-shadow: 0 0 8px #FF00FF, 0 0 24px #FF00FF, 0 0 48px #cc00cc;
-    letter-spacing: 4px;
+    font-family: 'Share Tech Mono', monospace !important;
+    font-size: 2rem !important;
+    color: #00FF41 !important;
+    text-shadow: 0 0 8px #00FF41, 0 0 20px #00CC33;
+    letter-spacing: 3px;
+    border-bottom: 1px solid #00FF41;
+    padding-bottom: 6px;
 }
 
-/* Section headers */
+/* ── Section headers ── */
 h2, h3 {
-    font-family: 'Orbitron', sans-serif !important;
-    color: #00FFFF !important;
-    text-shadow: 0 0 6px #00FFFF, 0 0 18px #00CCCC;
+    font-family: 'Share Tech Mono', monospace !important;
+    color: #00FF41 !important;
+    text-shadow: 0 0 6px #00CC33;
     letter-spacing: 2px;
 }
 
-/* Tabs */
+/* ── Tabs — Win95-style raised buttons ── */
 .stTabs [data-baseweb="tab-list"] {
-    background: #0a0a2e;
-    border-bottom: 2px solid #FF00FF;
-    gap: 3px;
+    background: #000080;
+    border-bottom: 3px solid #00FF41;
+    gap: 2px;
+    padding: 4px 4px 0;
 }
 .stTabs [data-baseweb="tab"] {
-    background: #0a0a2e !important;
-    color: #00FFFF !important;
-    font-family: 'VT323', monospace !important;
-    font-size: 20px !important;
-    border: 1px solid #00FFFF !important;
-    border-bottom: none !important;
+    background: #c0c0c0 !important;
+    color: #000000 !important;
+    font-family: 'Share Tech Mono', monospace !important;
+    font-size: 14px !important;
+    border-top: 2px solid #ffffff !important;
+    border-left: 2px solid #ffffff !important;
+    border-right: 2px solid #808080 !important;
+    border-bottom: 2px solid #808080 !important;
     border-radius: 0 !important;
+    padding: 4px 12px !important;
 }
 .stTabs [aria-selected="true"] {
-    background: #FF00FF !important;
-    color: #000011 !important;
-    border-color: #FF00FF !important;
-    text-shadow: none !important;
+    background: #00FF41 !important;
+    color: #000000 !important;
+    border-top: 2px solid #aaffaa !important;
+    border-left: 2px solid #aaffaa !important;
+    border-right: 2px solid #006600 !important;
+    border-bottom: 2px solid #006600 !important;
+    font-weight: bold;
 }
 
-/* Metric cards */
+/* ── Metric cards — Win95 raised panels on green ── */
 [data-testid="metric-container"] {
-    background: rgba(0,255,255,0.05) !important;
-    border: 1px solid #00FFFF !important;
+    background: #0d1a0d !important;
+    border-top: 2px solid #00FF41 !important;
+    border-left: 2px solid #00FF41 !important;
+    border-right: 2px solid #004d00 !important;
+    border-bottom: 2px solid #004d00 !important;
     border-radius: 0 !important;
-    box-shadow: 0 0 12px rgba(0,255,255,0.25), inset 0 0 8px rgba(0,255,255,0.05);
     padding: 10px !important;
 }
 [data-testid="metric-container"] label {
-    color: #FF00FF !important;
-    font-size: 16px !important;
+    color: #00CC33 !important;
+    font-size: 13px !important;
+    text-transform: uppercase;
+    letter-spacing: 1px;
 }
 [data-testid="stMetricValue"] {
-    color: #FFFF00 !important;
-    font-size: 28px !important;
-    text-shadow: 0 0 6px #FFFF00;
+    color: #00FF41 !important;
+    font-size: 26px !important;
+    text-shadow: 0 0 8px #00FF41;
 }
-[data-testid="stMetricDelta"] { color: #00FF41 !important; }
+[data-testid="stMetricDelta"] { color: #66FF66 !important; }
 
-/* Selectbox */
-[data-testid="stSelectbox"] label { color: #FF00FF !important; }
+/* ── Selectbox ── */
+[data-testid="stSelectbox"] label { color: #00FF41 !important; }
 [data-testid="stSelectbox"] [data-baseweb="select"] > div {
-    background: #0a0a2e !important;
-    border: 1px solid #00FFFF !important;
+    background: #0d1a0d !important;
+    border: 1px solid #00FF41 !important;
+    border-radius: 0 !important;
+    color: #00FF41 !important;
+    font-family: 'Share Tech Mono', monospace !important;
+}
+
+/* ── Dataframe container ── */
+[data-testid="stDataFrame"] {
+    border: 1px solid #00FF41 !important;
+    box-shadow: 0 0 16px rgba(0, 255, 65, 0.25);
+}
+
+/* ── AG Grid table internals ── */
+.ag-root-wrapper {
+    background-color: #0a0a0a !important;
+    border: none !important;
+    font-family: 'Share Tech Mono', monospace !important;
+}
+.ag-header, .ag-header-row {
+    background-color: #001a00 !important;
+    border-bottom: 2px solid #00FF41 !important;
+    font-family: 'Share Tech Mono', monospace !important;
+}
+.ag-header-cell-label, .ag-header-cell-text {
+    color: #00FF41 !important;
+    font-family: 'Share Tech Mono', monospace !important;
+    font-size: 13px !important;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+.ag-row {
+    background-color: #0a0a0a !important;
+    border-color: #002200 !important;
+    font-family: 'Share Tech Mono', monospace !important;
+}
+.ag-row:hover, .ag-row-hover {
+    background-color: #001a00 !important;
+}
+.ag-row-even { background-color: #0d0d0d !important; }
+.ag-row-odd  { background-color: #111111 !important; }
+.ag-cell {
+    color: #00FF41 !important;
+    font-family: 'Share Tech Mono', monospace !important;
+    font-size: 13px !important;
+    border-color: #002200 !important;
+}
+.ag-row-selected .ag-cell, .ag-row-selected {
+    background-color: #003300 !important;
+}
+
+/* ── Download button ── */
+[data-testid="stDownloadButton"] button {
+    background: #0d1a0d !important;
+    border-top: 2px solid #00FF41 !important;
+    border-left: 2px solid #00FF41 !important;
+    border-right: 2px solid #004d00 !important;
+    border-bottom: 2px solid #004d00 !important;
+    color: #00FF41 !important;
+    font-family: 'Share Tech Mono', monospace !important;
+    font-size: 14px !important;
+    border-radius: 0 !important;
+}
+[data-testid="stDownloadButton"] button:hover {
+    background: #003300 !important;
+    box-shadow: 0 0 8px #00FF41;
+}
+
+/* ── Divider ── */
+hr { border-color: #00FF41 !important; box-shadow: 0 0 4px #00FF41; }
+
+/* ── Info boxes ── */
+[data-testid="stInfo"], .stAlert {
+    background: #0d1a0d !important;
+    border: 1px solid #00FF41 !important;
     border-radius: 0 !important;
     color: #00FF41 !important;
 }
 
-/* Dataframe */
-[data-testid="stDataFrame"] {
-    border: 1px solid #FF00FF !important;
-    box-shadow: 0 0 14px rgba(255,0,255,0.3);
-}
-
-/* Download button */
-[data-testid="stDownloadButton"] button {
-    background: #0a0a2e !important;
-    border: 1px solid #FF00FF !important;
-    color: #FF00FF !important;
-    font-family: 'VT323', monospace !important;
-    font-size: 18px !important;
-    border-radius: 0 !important;
-}
-[data-testid="stDownloadButton"] button:hover {
-    background: #FF00FF !important;
-    color: #000011 !important;
-}
-
-/* Divider */
-hr { border-color: #FF00FF !important; box-shadow: 0 0 5px #FF00FF; }
-
-/* Info / warning boxes */
-[data-testid="stInfo"], .stAlert {
-    background: rgba(0,255,255,0.08) !important;
-    border: 1px solid #00FFFF !important;
-    border-radius: 0 !important;
-    color: #00FFFF !important;
-}
-
-/* Spinner */
-[data-testid="stSpinner"] { color: #FF00FF !important; }
-
-/* Caption / small text */
-small, .stCaption { color: #888 !important; font-size: 14px !important; }
+/* ── Spinner / caption ── */
+[data-testid="stSpinner"] { color: #00FF41 !important; }
+small, .stCaption { color: #006600 !important; font-size: 13px !important; }
 </style>
 """, unsafe_allow_html=True)
 
