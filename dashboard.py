@@ -995,7 +995,7 @@ if df is not None:
     # =========================================================================
     with tab5:
         st.subheader("🤖 ML Model Predictions (XGBoost)")
-        st.markdown("*Trained nightly on 3+ seasons of Torvik efficiency data. "
+        st.markdown("*Trained nightly on 3+ seasons of KenPom efficiency data. "
                     "Predicts margin and total score separately.*")
 
         @st.cache_data(ttl=3600)
