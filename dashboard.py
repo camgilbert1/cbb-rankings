@@ -197,6 +197,40 @@ hr { border-color: #1E3A5F !important; }
 
 /* ── Caption / small ── */
 small, .stCaption { color: #4A6075 !important; font-size: 12px !important; }
+
+/* ── Metric delta — kill the white pill background ── */
+[data-testid="stMetricDelta"] {
+    background: transparent !important;
+    color: #6B8099 !important;
+}
+[data-testid="stMetricDelta"] > div,
+[data-testid="stMetricDelta"] span,
+[data-testid="stMetricDelta"] p {
+    background: transparent !important;
+    color: #6B8099 !important;
+}
+
+/* ── Any stray white/light surfaces ── */
+[data-testid="stVerticalBlock"],
+[data-testid="stHorizontalBlock"],
+section[data-testid="stSidebar"],
+.stApp > header,
+[data-testid="stForm"],
+[data-testid="stExpander"] {
+    background: transparent !important;
+}
+
+/* ── Info/warning/success/error alerts ── */
+[data-testid="stAlert"] > div {
+    background: #162032 !important;
+    color: #E8ECF0 !important;
+}
+[data-testid="stAlert"] p,
+[data-testid="stAlert"] li,
+[data-testid="stAlert"] code {
+    color: #E8ECF0 !important;
+    background: transparent !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
