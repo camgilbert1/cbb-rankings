@@ -5,6 +5,7 @@ Updated: 2026-02-06 - Added Bracketology tab
 """
 
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 from databricks import sql
 import os
@@ -478,6 +479,70 @@ def load_game_log(time_period):
         return pd.DataFrame()
 
 
+def render_matrix_table(df, row_delay=0.10):
+    """Render a dataframe as a Matrix-style cascade decode table (runs in components iframe)."""
+    headers = ''.join(f'<th>{col}</th>' for col in df.columns)
+
+    rows_html = []
+    for i, (_, row) in enumerate(df.iterrows()):
+        cells = ''
+        for col in df.columns:
+            val = '' if pd.isna(row[col]) else str(row[col])
+            val = val.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;')
+            cells += f'<td class="mc" data-f="{val}"></td>'
+        rows_html.append(f'<tr class="mr" data-d="{i * row_delay:.2f}">{cells}</tr>')
+
+    rows = '\n'.join(rows_html)
+    height = min(820, max(260, len(df) * 36 + 56))
+
+    return f"""<!DOCTYPE html><html><head>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{background:#0a0a0a;color:#00FF41;font-family:'Share Tech Mono','Courier New',monospace;padding:2px;overflow-x:auto}}
+table{{width:100%;border-collapse:collapse;font-size:13px;border:1px solid #00FF41;box-shadow:0 0 18px rgba(0,255,65,.22)}}
+thead tr{{background:#001a00;border-bottom:2px solid #00FF41}}
+th{{color:#00FF41;padding:8px 10px;text-align:left;text-transform:uppercase;letter-spacing:1px;font-size:11px;border-right:1px solid #002200;white-space:nowrap}}
+.mr{{opacity:0;border-bottom:1px solid #002200}}
+.mr:nth-child(even){{background:#0d0d0d}}
+.mr:nth-child(odd){{background:#111}}
+.mr:hover{{background:#001a00!important}}
+.mr.vis{{opacity:1}}
+.mc{{padding:7px 10px;border-right:1px solid #002200;white-space:nowrap;color:#00FF41}}
+.mc.dec{{color:#88ff88}}
+</style></head><body>
+<table><thead><tr>{headers}</tr></thead><tbody>{rows}</tbody></table>
+<script>
+(function(){{
+  var C='ﾊﾐﾋｰｳｼﾅﾓﾆｻﾜﾂｵﾘｱﾎﾃﾏｹﾒｴｶｷﾑﾕﾗｾﾈｽﾀﾇﾍABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#$%*<>[]!';
+  function r(){{return C[Math.floor(Math.random()*C.length)];}}
+  function decode(cell,txt){{
+    if(!txt){{cell.textContent='';return;}}
+    var f=0,tot=Math.max(txt.length*4,12);
+    cell.classList.add('dec');
+    var iv=setInterval(function(){{
+      var res=Math.floor(f/3);
+      cell.textContent=txt.split('').map(function(ch,i){{
+        if(i<res)return ch;
+        return ch===' '?' ':r();
+      }}).join('');
+      f++;
+      if(f>tot){{cell.textContent=txt;cell.classList.remove('dec');clearInterval(iv);}}
+    }},18);
+  }}
+  document.querySelectorAll('.mr').forEach(function(row){{
+    var delay=parseFloat(row.getAttribute('data-d'))*1000;
+    setTimeout(function(){{
+      row.classList.add('vis');
+      row.querySelectorAll('.mc').forEach(function(cell,i){{
+        setTimeout(function(){{decode(cell,cell.getAttribute('data-f'));}},i*45);
+      }});
+    }},delay);
+  }});
+}})();
+</script></body></html>""", height
+
+
 def render_matchup_card(row):
     """Render a styled matchup card as HTML."""
     top_seed = row['top_seed']
@@ -754,12 +819,8 @@ if df is not None:
                 'ATS Pick', 'ATS Conf.', 'Actual Score', 'Actual Winner', 'Actual ATS'
             ]]
 
-            st.dataframe(
-                compact_df,
-                use_container_width=True,
-                hide_index=True,
-                height=min(400, len(compact_df) * 35 + 38)
-            )
+            html, height = render_matrix_table(compact_df)
+            components.html(html, height=height, scrolling=True)
         else:
             st.info("No predictions available yet. Check back after the daily predictions run.")
 
