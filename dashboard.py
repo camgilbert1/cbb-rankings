@@ -18,6 +18,134 @@ st.set_page_config(
     layout="wide"
 )
 
+# ── 90s retro theme ──────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=VT323&family=Orbitron:wght@400;700;900&display=swap');
+
+/* Background */
+[data-testid="stAppViewContainer"] {
+    background-color: #000011;
+    background-image:
+        radial-gradient(ellipse at top, #0d0d3b 0%, #000011 65%),
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'%3E%3Crect width='40' height='40' fill='none'/%3E%3Cpath d='M0 0h40v1H0zM0 0v40h1V0' stroke='%23ffffff08' stroke-width='1'/%3E%3C/svg%3E");
+}
+[data-testid="stHeader"] { background: transparent !important; }
+[data-testid="block-container"] { padding-top: 1.5rem; }
+
+/* Base font */
+html, body, [class*="css"], .stMarkdown, p, li, td, th, label, span {
+    font-family: 'VT323', monospace !important;
+    font-size: 18px !important;
+    color: #c8ffc8 !important;
+}
+
+/* Page title */
+h1 {
+    font-family: 'Orbitron', sans-serif !important;
+    font-size: 2.4rem !important;
+    color: #FF00FF !important;
+    text-shadow: 0 0 8px #FF00FF, 0 0 24px #FF00FF, 0 0 48px #cc00cc;
+    letter-spacing: 4px;
+}
+
+/* Section headers */
+h2, h3 {
+    font-family: 'Orbitron', sans-serif !important;
+    color: #00FFFF !important;
+    text-shadow: 0 0 6px #00FFFF, 0 0 18px #00CCCC;
+    letter-spacing: 2px;
+}
+
+/* Tabs */
+.stTabs [data-baseweb="tab-list"] {
+    background: #0a0a2e;
+    border-bottom: 2px solid #FF00FF;
+    gap: 3px;
+}
+.stTabs [data-baseweb="tab"] {
+    background: #0a0a2e !important;
+    color: #00FFFF !important;
+    font-family: 'VT323', monospace !important;
+    font-size: 20px !important;
+    border: 1px solid #00FFFF !important;
+    border-bottom: none !important;
+    border-radius: 0 !important;
+}
+.stTabs [aria-selected="true"] {
+    background: #FF00FF !important;
+    color: #000011 !important;
+    border-color: #FF00FF !important;
+    text-shadow: none !important;
+}
+
+/* Metric cards */
+[data-testid="metric-container"] {
+    background: rgba(0,255,255,0.05) !important;
+    border: 1px solid #00FFFF !important;
+    border-radius: 0 !important;
+    box-shadow: 0 0 12px rgba(0,255,255,0.25), inset 0 0 8px rgba(0,255,255,0.05);
+    padding: 10px !important;
+}
+[data-testid="metric-container"] label {
+    color: #FF00FF !important;
+    font-size: 16px !important;
+}
+[data-testid="stMetricValue"] {
+    color: #FFFF00 !important;
+    font-size: 28px !important;
+    text-shadow: 0 0 6px #FFFF00;
+}
+[data-testid="stMetricDelta"] { color: #00FF41 !important; }
+
+/* Selectbox */
+[data-testid="stSelectbox"] label { color: #FF00FF !important; }
+[data-testid="stSelectbox"] [data-baseweb="select"] > div {
+    background: #0a0a2e !important;
+    border: 1px solid #00FFFF !important;
+    border-radius: 0 !important;
+    color: #00FF41 !important;
+}
+
+/* Dataframe */
+[data-testid="stDataFrame"] {
+    border: 1px solid #FF00FF !important;
+    box-shadow: 0 0 14px rgba(255,0,255,0.3);
+}
+
+/* Download button */
+[data-testid="stDownloadButton"] button {
+    background: #0a0a2e !important;
+    border: 1px solid #FF00FF !important;
+    color: #FF00FF !important;
+    font-family: 'VT323', monospace !important;
+    font-size: 18px !important;
+    border-radius: 0 !important;
+}
+[data-testid="stDownloadButton"] button:hover {
+    background: #FF00FF !important;
+    color: #000011 !important;
+}
+
+/* Divider */
+hr { border-color: #FF00FF !important; box-shadow: 0 0 5px #FF00FF; }
+
+/* Info / warning boxes */
+[data-testid="stInfo"], .stAlert {
+    background: rgba(0,255,255,0.08) !important;
+    border: 1px solid #00FFFF !important;
+    border-radius: 0 !important;
+    color: #00FFFF !important;
+}
+
+/* Spinner */
+[data-testid="stSpinner"] { color: #FF00FF !important; }
+
+/* Caption / small text */
+small, .stCaption { color: #888 !important; font-size: 14px !important; }
+</style>
+""", unsafe_allow_html=True)
+
 # Title
 st.title("🏀 College Basketball Rankings Dashboard")
 st.markdown("*Powered by KenPom efficiency metrics*")
