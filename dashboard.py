@@ -690,7 +690,7 @@ if df is not None:
             # Game log
             if not game_log.empty:
                 st.markdown("---")
-                st.subheader("Game Log")
+                st.subheader(f"Game Log — {time_period}")
 
                 log = game_log.copy()
                 log['Date'] = pd.to_datetime(log['game_date']).dt.strftime('%b %d')
