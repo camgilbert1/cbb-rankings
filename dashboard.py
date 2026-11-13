@@ -1092,9 +1092,6 @@ if df is not None:
                 + '-'
                 + display['ml_predicted_away_score'].apply(lambda x: f"{x:.0f}")
             )
-            display['Margin'] = display['ml_predicted_margin'].apply(
-                lambda x: f"+{x:.1f}" if x > 0 else f"{x:.1f}"
-            )
             display['Total']  = display['ml_predicted_total'].apply(lambda x: f"{x:.0f}")
             display['Win %']  = display['ml_win_probability'].apply(lambda x: f"{x:.0%}")
 
@@ -1108,19 +1105,25 @@ if df is not None:
                 s = row.get('vegas_spread')
                 if s is None or pd.isna(s) or s == 0:
                     return '—'
-                # edge > 0 means ML thinks home covers
                 edge = row['ml_predicted_margin'] + s
                 if edge > 0:
                     return f"{row['home_team']} {s:.1f}"
                 else:
                     return f"{row['away_team']} +{abs(s):.1f}"
 
-            display['Spread']       = display.apply(fmt_spread, axis=1)
-            display['ML ATS Pick']  = display.apply(ml_ats_pick, axis=1)
+            def ats_edge(row):
+                s = row.get('vegas_spread')
+                if s is None or pd.isna(s) or s == 0:
+                    return None
+                return abs(row['ml_predicted_margin'] + s)
 
-            display = display.sort_values('ml_predicted_margin', ascending=False)
+            display['Spread']      = display.apply(fmt_spread, axis=1)
+            display['ML ATS Pick'] = display.apply(ml_ats_pick, axis=1)
+            display['_edge']       = display.apply(ats_edge, axis=1)
+            display['Edge']        = display['_edge'].apply(lambda x: f"+{x:.1f}" if x is not None else '—')
+            display = display.sort_values('_edge', ascending=False, na_position='last').drop(columns='_edge')
 
-            show_cols = ['Matchup', 'Spread', 'ML ATS Pick', 'ML Winner', 'Win %', 'Pred Score', 'Margin', 'Total']
+            show_cols = ['Matchup', 'Spread', 'ML ATS Pick', 'Edge', 'ML Winner', 'Win %', 'Pred Score', 'Total']
             html, height = render_scoreboard_table(display[show_cols])
             components.html(html, height=height, scrolling=True)
 
