@@ -19,6 +19,7 @@ from GamePredictions import (
     calculate_matchup_features,
     predict_game
 )
+from team_names import BRACKETMATRIX_TO_KENPOM
 
 load_dotenv()
 
@@ -34,19 +35,6 @@ FIRST_ROUND_MATCHUPS = [
 
 REGIONS = ['East', 'West', 'South', 'Midwest']
 
-# BracketMatrix uses different team name conventions than KenPom.
-# Add any name that fails to match here: 'BracketMatrix name' -> 'KenPom name'
-BRACKETMATRIX_TO_KENPOM = {
-    'NC-Wilmington': 'UNC Wilmington',
-    'Miami (FLA.)': 'Miami FL',
-    'Miami (Ohio)': 'Miami OH',
-    'E. Tennessee State': 'East Tennessee St.',
-    'Tennessee-Martin': 'UT Martin',
-    'Long Island': 'LIU',
-    "St. Mary's (CA)": "Saint Mary's",
-    'North Carolina State': 'NC State',
-    'Bethune-Cookman': 'Bethune Cookman',
-}
 
 
 # =============================================================================
