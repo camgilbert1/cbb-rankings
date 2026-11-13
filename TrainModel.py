@@ -315,6 +315,28 @@ def load_models():
 # PREDICTION GENERATION
 # =============================================================================
 
+ATS_CONFIDENCE_HIGH   = 8.0
+ATS_CONFIDENCE_MEDIUM = 4.0
+
+
+def fetch_spreads_from_history(game_date):
+    """Pull vegas_spread for today's games from prediction_history (populated by GamePredictions.py)."""
+    try:
+        conn = db_connect()
+        cursor = conn.cursor()
+        cursor.execute(f"""
+            SELECT home_team, away_team, vegas_spread
+            FROM workspace.default.prediction_history
+            WHERE game_date = '{game_date}' AND vegas_spread != 0
+        """)
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        return {(r[0], r[1]): float(r[2]) for r in rows}
+    except Exception:
+        return {}
+
+
 def fetch_todays_games():
     eastern = pytz.timezone('US/Eastern')
     today = datetime.now(eastern).strftime('%Y%m%d')
@@ -344,7 +366,7 @@ def fetch_todays_games():
         return []
 
 
-def generate_predictions(models, games, ratings_df):
+def generate_predictions(models, games, ratings_df, spreads=None):
     if not models or not games:
         return []
     margin_model = models.get('margin_model', {}).get('model')
@@ -352,6 +374,7 @@ def generate_predictions(models, games, ratings_df):
     if not margin_model or not total_model:
         return []
 
+    spreads = spreads or {}
     version = models.get('margin_model', {}).get('version', 'unknown')
     records = []
 
@@ -386,6 +409,17 @@ def generate_predictions(models, games, ratings_df):
             pred_away   = (pred_total - pred_margin) / 2
             win_prob    = float(1 / (1 + np.exp(-pred_margin / 10)))
 
+            spread     = spreads.get((game['home_team'], game['away_team']), 0.0)
+            ats_edge   = abs(pred_margin + spread) if spread != 0 else None
+            if ats_edge is None:
+                ats_conf = 'Low'
+            elif ats_edge >= ATS_CONFIDENCE_HIGH:
+                ats_conf = 'High'
+            elif ats_edge >= ATS_CONFIDENCE_MEDIUM:
+                ats_conf = 'Medium'
+            else:
+                ats_conf = 'Low'
+
             records.append({
                 'game_date':               game['game_date'],
                 'home_team':               game['home_team'],
@@ -396,6 +430,8 @@ def generate_predictions(models, games, ratings_df):
                 'ml_predicted_total':      round(pred_total,  1),
                 'ml_win_probability':      round(win_prob,    4),
                 'model_version':           version,
+                'vegas_spread':            spread,
+                'ats_confidence':          ats_conf,
             })
         except Exception as e:
             print(f"  Prediction error {game['home_team']} vs {game['away_team']}: {e}")
@@ -417,20 +453,40 @@ def upload_predictions(records):
                 game_date DATE, home_team STRING, away_team STRING,
                 ml_predicted_home_score DOUBLE, ml_predicted_away_score DOUBLE,
                 ml_predicted_margin DOUBLE, ml_predicted_total DOUBLE,
-                ml_win_probability DOUBLE, model_version STRING, generated_at TIMESTAMP
+                ml_win_probability DOUBLE, model_version STRING, generated_at TIMESTAMP,
+                vegas_spread DOUBLE, ats_confidence STRING,
+                actual_home_score INT, actual_away_score INT, ml_ats_correct INT
             ) USING DELTA
         """)
+        for col_def in [
+            "vegas_spread DOUBLE", "ats_confidence STRING",
+            "actual_home_score INT", "actual_away_score INT", "ml_ats_correct INT",
+        ]:
+            try:
+                cursor.execute(f"ALTER TABLE workspace.default.ml_predictions ADD COLUMNS ({col_def})")
+            except Exception:
+                pass
+
         cursor.execute(f"DELETE FROM workspace.default.ml_predictions WHERE game_date = '{game_date}'")
         for rec in records:
             he = rec['home_team'].replace("'", "''")
             ae = rec['away_team'].replace("'", "''")
             cursor.execute(f"""
-                INSERT INTO workspace.default.ml_predictions VALUES (
+                INSERT INTO workspace.default.ml_predictions
+                    (game_date, home_team, away_team,
+                     ml_predicted_home_score, ml_predicted_away_score,
+                     ml_predicted_margin, ml_predicted_total,
+                     ml_win_probability, model_version, generated_at,
+                     vegas_spread, ats_confidence,
+                     actual_home_score, actual_away_score, ml_ats_correct)
+                VALUES (
                     '{rec['game_date']}', '{he}', '{ae}',
                     {rec['ml_predicted_home_score']}, {rec['ml_predicted_away_score']},
                     {rec['ml_predicted_margin']}, {rec['ml_predicted_total']},
                     {rec['ml_win_probability']}, '{rec['model_version']}',
-                    current_timestamp()
+                    current_timestamp(),
+                    {rec['vegas_spread']}, '{rec['ats_confidence']}',
+                    NULL, NULL, NULL
                 )
             """)
         cursor.close()
@@ -498,7 +554,10 @@ def main():
         return
 
     games = fetch_todays_games()
-    prediction_records = generate_predictions(models, games, ratings_df)
+    today_date = games[0]['game_date'] if games else datetime.now(pytz.timezone('US/Eastern')).strftime('%Y-%m-%d')
+    spreads = fetch_spreads_from_history(today_date)
+    print(f"  Loaded spreads for {len(spreads)} games from prediction_history")
+    prediction_records = generate_predictions(models, games, ratings_df, spreads=spreads)
     upload_predictions(prediction_records)
 
     # 7. Summary
