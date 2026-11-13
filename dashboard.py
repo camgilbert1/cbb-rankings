@@ -19,187 +19,183 @@ st.set_page_config(
     layout="wide"
 )
 
-# ── 90s Matrix / Windows terminal theme ──────────────────────────────────────
+# ── 2000s College Basketball / ESPN Classic theme ─────────────────────────────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Open+Sans:wght@400;600&display=swap');
 
-/* ── CRT black background with scanline overlay ── */
+/* ── Background — arena at night ── */
 [data-testid="stAppViewContainer"] {
-    background-color: #0a0a0a;
-    background-image: repeating-linear-gradient(
-        0deg,
-        transparent,
-        transparent 3px,
-        rgba(0, 255, 65, 0.018) 3px,
-        rgba(0, 255, 65, 0.018) 4px
-    );
+    background: linear-gradient(160deg, #0d1b2e 0%, #091420 100%);
 }
 [data-testid="stHeader"] { background: transparent !important; }
 [data-testid="block-container"] { padding-top: 1.5rem; }
 
-/* ── Base font — terminal monospace ── */
+/* ── Base font ── */
 html, body, [class*="css"], .stMarkdown, p, li, label, span, div {
-    font-family: 'Share Tech Mono', 'Courier New', monospace !important;
-    color: #00FF41 !important;
+    font-family: 'Open Sans', sans-serif !important;
+    color: #E8ECF0 !important;
 }
 
 /* ── Page title ── */
 h1 {
-    font-family: 'Share Tech Mono', monospace !important;
-    font-size: 2rem !important;
-    color: #00FF41 !important;
-    text-shadow: 0 0 8px #00FF41, 0 0 20px #00CC33;
+    font-family: 'Oswald', sans-serif !important;
+    font-weight: 700 !important;
+    font-size: 2.2rem !important;
+    text-transform: uppercase !important;
+    color: #FFFFFF !important;
     letter-spacing: 3px;
-    border-bottom: 1px solid #00FF41;
-    padding-bottom: 6px;
+    border-left: 6px solid #E03A00;
+    padding-left: 14px;
+    text-shadow: none;
 }
 
 /* ── Section headers ── */
 h2, h3 {
-    font-family: 'Share Tech Mono', monospace !important;
-    color: #00FF41 !important;
-    text-shadow: 0 0 6px #00CC33;
+    font-family: 'Oswald', sans-serif !important;
+    font-weight: 600 !important;
+    text-transform: uppercase !important;
+    color: #E03A00 !important;
     letter-spacing: 2px;
 }
 
-/* ── Tabs — Win95-style raised buttons ── */
+/* ── Tabs — ESPN nav bar style ── */
 .stTabs [data-baseweb="tab-list"] {
-    background: #000080;
-    border-bottom: 3px solid #00FF41;
-    gap: 2px;
-    padding: 4px 4px 0;
+    background: #091420;
+    border-bottom: 3px solid #E03A00;
+    gap: 0;
 }
 .stTabs [data-baseweb="tab"] {
-    background: #c0c0c0 !important;
-    color: #000000 !important;
-    font-family: 'Share Tech Mono', monospace !important;
-    font-size: 14px !important;
-    border-top: 2px solid #ffffff !important;
-    border-left: 2px solid #ffffff !important;
-    border-right: 2px solid #808080 !important;
-    border-bottom: 2px solid #808080 !important;
+    background: #0d1b2e !important;
+    color: #6B8099 !important;
+    font-family: 'Oswald', sans-serif !important;
+    font-size: 15px !important;
+    text-transform: uppercase !important;
+    letter-spacing: 1px !important;
+    border: none !important;
+    border-right: 1px solid #1E3A5F !important;
     border-radius: 0 !important;
-    padding: 4px 12px !important;
+    padding: 10px 22px !important;
+    transition: color 0.15s, background 0.15s;
+}
+.stTabs [data-baseweb="tab"]:hover {
+    color: #FFFFFF !important;
+    background: #162032 !important;
 }
 .stTabs [aria-selected="true"] {
-    background: #00FF41 !important;
-    color: #000000 !important;
-    border-top: 2px solid #aaffaa !important;
-    border-left: 2px solid #aaffaa !important;
-    border-right: 2px solid #006600 !important;
-    border-bottom: 2px solid #006600 !important;
-    font-weight: bold;
+    background: #E03A00 !important;
+    color: #FFFFFF !important;
+    font-weight: 600 !important;
 }
 
-/* ── Metric cards — Win95 raised panels on green ── */
+/* ── Metric cards — ESPN stat block style ── */
 [data-testid="metric-container"] {
-    background: #0d1a0d !important;
-    border-top: 2px solid #00FF41 !important;
-    border-left: 2px solid #00FF41 !important;
-    border-right: 2px solid #004d00 !important;
-    border-bottom: 2px solid #004d00 !important;
-    border-radius: 0 !important;
-    padding: 10px !important;
+    background: #162032 !important;
+    border: none !important;
+    border-top: 4px solid #E03A00 !important;
+    border-radius: 3px !important;
+    padding: 14px !important;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.4);
 }
 [data-testid="metric-container"] label {
-    color: #00CC33 !important;
-    font-size: 13px !important;
-    text-transform: uppercase;
-    letter-spacing: 1px;
+    color: #6B8099 !important;
+    font-family: 'Oswald', sans-serif !important;
+    font-size: 11px !important;
+    text-transform: uppercase !important;
+    letter-spacing: 1.5px !important;
+    font-weight: 500 !important;
 }
 [data-testid="stMetricValue"] {
-    color: #00FF41 !important;
-    font-size: 26px !important;
-    text-shadow: 0 0 8px #00FF41;
+    color: #FFFFFF !important;
+    font-family: 'Oswald', sans-serif !important;
+    font-size: 30px !important;
+    font-weight: 600 !important;
 }
-[data-testid="stMetricDelta"] { color: #66FF66 !important; }
+[data-testid="stMetricDelta"] { color: #FFC107 !important; }
 
 /* ── Selectbox ── */
-[data-testid="stSelectbox"] label { color: #00FF41 !important; }
+[data-testid="stSelectbox"] label {
+    color: #6B8099 !important;
+    font-family: 'Oswald', sans-serif !important;
+    text-transform: uppercase !important;
+    font-size: 11px !important;
+    letter-spacing: 1px !important;
+}
 [data-testid="stSelectbox"] [data-baseweb="select"] > div {
-    background: #0d1a0d !important;
-    border: 1px solid #00FF41 !important;
-    border-radius: 0 !important;
-    color: #00FF41 !important;
-    font-family: 'Share Tech Mono', monospace !important;
+    background: #162032 !important;
+    border: 1px solid #1E3A5F !important;
+    border-radius: 3px !important;
+    color: #FFFFFF !important;
 }
 
 /* ── Dataframe container ── */
 [data-testid="stDataFrame"] {
-    border: 1px solid #00FF41 !important;
-    box-shadow: 0 0 16px rgba(0, 255, 65, 0.25);
+    border: 1px solid #1E3A5F !important;
+    border-radius: 3px !important;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.3);
 }
 
-/* ── AG Grid table internals ── */
+/* ── AG Grid internals ── */
 .ag-root-wrapper {
-    background-color: #0a0a0a !important;
+    background: #0d1b2e !important;
     border: none !important;
-    font-family: 'Share Tech Mono', monospace !important;
+    font-family: 'Open Sans', sans-serif !important;
 }
 .ag-header, .ag-header-row {
-    background-color: #001a00 !important;
-    border-bottom: 2px solid #00FF41 !important;
-    font-family: 'Share Tech Mono', monospace !important;
+    background: #162032 !important;
+    border-bottom: 2px solid #E03A00 !important;
 }
 .ag-header-cell-label, .ag-header-cell-text {
-    color: #00FF41 !important;
-    font-family: 'Share Tech Mono', monospace !important;
-    font-size: 13px !important;
-    text-transform: uppercase;
-    letter-spacing: 1px;
+    color: #E03A00 !important;
+    font-family: 'Oswald', sans-serif !important;
+    font-size: 11px !important;
+    text-transform: uppercase !important;
+    letter-spacing: 1px !important;
 }
 .ag-row {
-    background-color: #0a0a0a !important;
-    border-color: #002200 !important;
-    font-family: 'Share Tech Mono', monospace !important;
+    background: #0d1b2e !important;
+    border-color: #1E3A5F !important;
 }
-.ag-row:hover, .ag-row-hover {
-    background-color: #001a00 !important;
-}
-.ag-row-even { background-color: #0d0d0d !important; }
-.ag-row-odd  { background-color: #111111 !important; }
+.ag-row-even { background: #0d1b2e !important; }
+.ag-row-odd  { background: #111f30 !important; }
+.ag-row:hover, .ag-row-hover { background: #1a2d47 !important; }
 .ag-cell {
-    color: #00FF41 !important;
-    font-family: 'Share Tech Mono', monospace !important;
+    color: #E8ECF0 !important;
+    font-family: 'Open Sans', sans-serif !important;
     font-size: 13px !important;
-    border-color: #002200 !important;
-}
-.ag-row-selected .ag-cell, .ag-row-selected {
-    background-color: #003300 !important;
+    border-color: #1E3A5F !important;
 }
 
 /* ── Download button ── */
 [data-testid="stDownloadButton"] button {
-    background: #0d1a0d !important;
-    border-top: 2px solid #00FF41 !important;
-    border-left: 2px solid #00FF41 !important;
-    border-right: 2px solid #004d00 !important;
-    border-bottom: 2px solid #004d00 !important;
-    color: #00FF41 !important;
-    font-family: 'Share Tech Mono', monospace !important;
+    background: #162032 !important;
+    border: 1px solid #E03A00 !important;
+    color: #E03A00 !important;
+    font-family: 'Oswald', sans-serif !important;
     font-size: 14px !important;
-    border-radius: 0 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 1px !important;
+    border-radius: 2px !important;
 }
 [data-testid="stDownloadButton"] button:hover {
-    background: #003300 !important;
-    box-shadow: 0 0 8px #00FF41;
+    background: #E03A00 !important;
+    color: #FFFFFF !important;
 }
 
 /* ── Divider ── */
-hr { border-color: #00FF41 !important; box-shadow: 0 0 4px #00FF41; }
+hr { border-color: #1E3A5F !important; }
 
 /* ── Info boxes ── */
 [data-testid="stInfo"], .stAlert {
-    background: #0d1a0d !important;
-    border: 1px solid #00FF41 !important;
-    border-radius: 0 !important;
-    color: #00FF41 !important;
+    background: #162032 !important;
+    border: 1px solid #1E3A5F !important;
+    border-left: 4px solid #E03A00 !important;
+    border-radius: 2px !important;
+    color: #E8ECF0 !important;
 }
 
-/* ── Spinner / caption ── */
-[data-testid="stSpinner"] { color: #00FF41 !important; }
-small, .stCaption { color: #006600 !important; font-size: 13px !important; }
+/* ── Caption / small ── */
+small, .stCaption { color: #4A6075 !important; font-size: 12px !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -479,8 +475,8 @@ def load_game_log(time_period):
         return pd.DataFrame()
 
 
-def render_matrix_table(df, row_delay=0.10):
-    """Render a dataframe as a Matrix-style cascade decode table (runs in components iframe)."""
+def render_scoreboard_table(df, row_delay=0.09):
+    """Render a dataframe as an ESPN-style scoreboard with cascade reveal animation."""
     headers = ''.join(f'<th>{col}</th>' for col in df.columns)
 
     rows_html = []
@@ -496,46 +492,46 @@ def render_matrix_table(df, row_delay=0.10):
     height = min(820, max(260, len(df) * 36 + 56))
 
     return f"""<!DOCTYPE html><html><head>
-<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600&family=Open+Sans&display=swap" rel="stylesheet">
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
-body{{background:#0a0a0a;color:#00FF41;font-family:'Share Tech Mono','Courier New',monospace;padding:2px;overflow-x:auto}}
-table{{width:100%;border-collapse:collapse;font-size:13px;border:1px solid #00FF41;box-shadow:0 0 18px rgba(0,255,65,.22)}}
-thead tr{{background:#001a00;border-bottom:2px solid #00FF41}}
-th{{color:#00FF41;padding:8px 10px;text-align:left;text-transform:uppercase;letter-spacing:1px;font-size:11px;border-right:1px solid #002200;white-space:nowrap}}
-.mr{{opacity:0;border-bottom:1px solid #002200}}
-.mr:nth-child(even){{background:#0d0d0d}}
-.mr:nth-child(odd){{background:#111}}
-.mr:hover{{background:#001a00!important}}
+body{{background:#0d1b2e;color:#E8ECF0;font-family:'Open Sans',sans-serif;padding:2px;overflow-x:auto}}
+table{{width:100%;border-collapse:collapse;font-size:13px;border:1px solid #1E3A5F;box-shadow:0 2px 12px rgba(0,0,0,.4)}}
+thead tr{{background:#162032;border-bottom:2px solid #E03A00}}
+th{{color:#E03A00;padding:9px 11px;text-align:left;text-transform:uppercase;letter-spacing:1px;font-size:11px;font-family:'Oswald',sans-serif;font-weight:600;border-right:1px solid #1E3A5F;white-space:nowrap}}
+.mr{{opacity:0;border-bottom:1px solid #1E3A5F;transition:background .15s}}
+.mr:nth-child(even){{background:#0d1b2e}}
+.mr:nth-child(odd){{background:#111f30}}
+.mr:hover{{background:#1a2d47!important}}
 .mr.vis{{opacity:1}}
-.mc{{padding:7px 10px;border-right:1px solid #002200;white-space:nowrap;color:#00FF41}}
-.mc.dec{{color:#88ff88}}
+.mc{{padding:8px 11px;border-right:1px solid #1E3A5F;white-space:nowrap;color:#E8ECF0}}
+.mc.dec{{color:#6B8099}}
 </style></head><body>
 <table><thead><tr>{headers}</tr></thead><tbody>{rows}</tbody></table>
 <script>
 (function(){{
-  var C='ﾊﾐﾋｰｳｼﾅﾓﾆｻﾜﾂｵﾘｱﾎﾃﾏｹﾒｴｶｷﾑﾕﾗｾﾈｽﾀﾇﾍABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#$%*<>[]!';
+  var C='ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   function r(){{return C[Math.floor(Math.random()*C.length)];}}
   function decode(cell,txt){{
     if(!txt){{cell.textContent='';return;}}
-    var f=0,tot=Math.max(txt.length*4,12);
+    var f=0,tot=Math.max(txt.length*3,10);
     cell.classList.add('dec');
     var iv=setInterval(function(){{
-      var res=Math.floor(f/3);
+      var res=Math.floor(f/2);
       cell.textContent=txt.split('').map(function(ch,i){{
         if(i<res)return ch;
-        return ch===' '?' ':r();
+        return (ch===' '||ch==='@'||ch==='.'||ch==='-'||ch==='%'||ch==='+')?ch:r();
       }}).join('');
       f++;
       if(f>tot){{cell.textContent=txt;cell.classList.remove('dec');clearInterval(iv);}}
-    }},18);
+    }},16);
   }}
   document.querySelectorAll('.mr').forEach(function(row){{
     var delay=parseFloat(row.getAttribute('data-d'))*1000;
     setTimeout(function(){{
       row.classList.add('vis');
       row.querySelectorAll('.mc').forEach(function(cell,i){{
-        setTimeout(function(){{decode(cell,cell.getAttribute('data-f'));}},i*45);
+        setTimeout(function(){{decode(cell,cell.getAttribute('data-f'));}},i*40);
       }});
     }},delay);
   }});
@@ -819,7 +815,7 @@ if df is not None:
                 'ATS Pick', 'ATS Conf.', 'Actual Winner', 'Actual ATS'
             ]]
 
-            html, height = render_matrix_table(compact_df)
+            html, height = render_scoreboard_table(compact_df)
             components.html(html, height=height, scrolling=True)
         else:
             st.info("No predictions available yet. Check back after the daily predictions run.")
