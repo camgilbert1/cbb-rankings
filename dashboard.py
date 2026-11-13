@@ -1085,19 +1085,18 @@ if df is not None:
             ml_perf    = load_ml_performance()
 
         # ATS record by confidence
-        if ml_perf:
-            st.markdown("### ATS Record by Confidence")
-            col1, col2, col3 = st.columns(3)
-            for col_widget, conf, emoji in [(col1, 'High', '🟢'), (col2, 'Medium', '🟡'), (col3, 'Low', '🔴')]:
-                with col_widget:
-                    if conf in ml_perf:
-                        p = ml_perf[conf]
-                        pct = p['wins'] / p['total'] * 100 if p['total'] > 0 else 0
-                        st.metric(f"{emoji} {conf}", f"{p['wins']}-{p['losses']} ({pct:.0f}%)",
-                                  delta=f"{p['total']} games tracked")
-                    else:
-                        st.metric(f"{emoji} {conf}", "0-0", delta="no games yet")
-            st.markdown("---")
+        st.markdown("### ML Model ATS Record")
+        col1, col2, col3 = st.columns(3)
+        for col_widget, conf, emoji in [(col1, 'High', '🟢'), (col2, 'Medium', '🟡'), (col3, 'Low', '🔴')]:
+            with col_widget:
+                if conf in ml_perf and ml_perf[conf]['total'] > 0:
+                    p = ml_perf[conf]
+                    pct = p['wins'] / p['total'] * 100
+                    st.metric(f"{emoji} {conf} Confidence", f"{p['wins']}-{p['losses']} ({pct:.0f}%)",
+                              delta=f"{p['total']} games graded")
+                else:
+                    st.metric(f"{emoji} {conf} Confidence", "0-0", delta="no results yet")
+        st.markdown("---")
 
         # Model metadata cards
         if metadata:
