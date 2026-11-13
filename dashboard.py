@@ -652,7 +652,7 @@ if df is not None:
         ]
 
     # Tabs
-    tab1, tab2, tab3, tab4 = st.tabs(["📊 Rankings", "🎯 Picks", "🏆 Bracketology", "📈 Performance"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Rankings", "🎯 Picks", "🏆 Bracketology", "📈 Performance", "🤖 ML Model"])
 
     # =========================================================================
     # TAB 1: RANKINGS
@@ -989,6 +989,119 @@ if df is not None:
                 components.html(html, height=height, scrolling=True)
         else:
             st.info("No completed games with predictions yet. Performance tracking will begin after games are played!")
+
+    # =========================================================================
+    # TAB 5: ML MODEL
+    # =========================================================================
+    with tab5:
+        st.subheader("🤖 ML Model Predictions (XGBoost)")
+        st.markdown("*Trained nightly on 3+ seasons of Torvik efficiency data. "
+                    "Predicts margin and total score separately.*")
+
+        @st.cache_data(ttl=3600)
+        def load_ml_predictions():
+            try:
+                connection = sql.connect(
+                    server_hostname=st.secrets.get("DATABRICKS_HOST", os.getenv("DATABRICKS_HOST")),
+                    http_path=st.secrets.get("DATABRICKS_HTTP_PATH", os.getenv("DATABRICKS_HTTP_PATH")),
+                    access_token=st.secrets.get("DATABRICKS_TOKEN", os.getenv("DATABRICKS_TOKEN")),
+                    _socket_timeout=900
+                )
+                cursor = connection.cursor()
+                cursor.execute("""
+                    SELECT home_team, away_team, game_date,
+                           ml_predicted_home_score, ml_predicted_away_score,
+                           ml_predicted_margin, ml_predicted_total,
+                           ml_win_probability, model_version, generated_at
+                    FROM workspace.default.ml_predictions
+                    WHERE game_date = current_date()
+                    ORDER BY ABS(ml_predicted_margin) DESC
+                """)
+                df_ml = cursor.fetchall_arrow().to_pandas()
+                cursor.close()
+                connection.close()
+                return df_ml
+            except Exception:
+                return pd.DataFrame()
+
+        @st.cache_data(ttl=3600)
+        def load_model_metadata():
+            try:
+                connection = sql.connect(
+                    server_hostname=st.secrets.get("DATABRICKS_HOST", os.getenv("DATABRICKS_HOST")),
+                    http_path=st.secrets.get("DATABRICKS_HTTP_PATH", os.getenv("DATABRICKS_HTTP_PATH")),
+                    access_token=st.secrets.get("DATABRICKS_TOKEN", os.getenv("DATABRICKS_TOKEN")),
+                    _socket_timeout=900
+                )
+                cursor = connection.cursor()
+                cursor.execute("""
+                    SELECT model_name, model_version, training_games,
+                           xgb_cv_rmse, ridge_cv_rmse, season_weights, created_at
+                    FROM workspace.default.ml_models
+                    WHERE model_name IN ('margin_model', 'total_model')
+                """)
+                rows = cursor.fetchall()
+                cursor.close()
+                connection.close()
+                return {row[0]: row for row in rows}
+            except Exception:
+                return {}
+
+        ml_preds = load_ml_predictions()
+        metadata = load_model_metadata()
+
+        # Model metadata cards
+        if metadata:
+            st.markdown("---")
+            col_m, col_t = st.columns(2)
+            for col_widget, model_key, label in [
+                (col_m, 'margin_model', 'Margin Model'),
+                (col_t, 'total_model',  'Total Model'),
+            ]:
+                if model_key in metadata:
+                    row = metadata[model_key]
+                    _, version, n_games, xgb_rmse, ridge_rmse, weights_str, created_at = row
+                    with col_widget:
+                        st.markdown(f"**{label}**")
+                        st.metric("XGBoost CV RMSE", f"{xgb_rmse:.2f} pts")
+                        st.caption(f"Ridge baseline: {ridge_rmse:.2f} pts  |  "
+                                   f"Trained on {n_games:,} games  |  v{version}")
+            st.markdown("---")
+
+        # Today's predictions table
+        if not ml_preds.empty:
+            st.markdown(f"**Today's ML Picks — {len(ml_preds)} games**")
+
+            display = ml_preds.copy()
+            display['Matchup']  = display['away_team'] + ' @ ' + display['home_team']
+            display['ML Winner'] = display.apply(
+                lambda r: r['home_team'] if r['ml_predicted_margin'] > 0 else r['away_team'], axis=1
+            )
+            display['Pred Score'] = (
+                display['ml_predicted_home_score'].apply(lambda x: f"{x:.0f}")
+                + '-'
+                + display['ml_predicted_away_score'].apply(lambda x: f"{x:.0f}")
+            )
+            display['Margin'] = display['ml_predicted_margin'].apply(
+                lambda x: f"+{x:.1f}" if x > 0 else f"{x:.1f}"
+            )
+            display['Total']  = display['ml_predicted_total'].apply(lambda x: f"{x:.0f}")
+            display['Win %']  = display['ml_win_probability'].apply(lambda x: f"{x:.0%}")
+
+            show_cols = ['Matchup', 'ML Winner', 'Win %', 'Pred Score', 'Margin', 'Total']
+            html, height = render_scoreboard_table(display[show_cols])
+            components.html(html, height=height, scrolling=True)
+
+            if 'model_version' in ml_preds.columns and len(ml_preds) > 0:
+                st.caption(f"Model: v{ml_preds.iloc[0]['model_version']}")
+        else:
+            st.info(
+                "No ML predictions for today yet.\n\n"
+                "**Setup steps:**\n"
+                "1. Run `python BackfillHistoricalData.py` once to seed historical training data\n"
+                "2. Run `python TrainModel.py` to train the model and generate today's picks\n\n"
+                "After that the CI pipeline retrains automatically every night."
+            )
 
     # Footer
     st.markdown("---")
