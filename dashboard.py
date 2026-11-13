@@ -268,6 +268,8 @@ def load_game_log(time_period):
                 confidence,
                 predicted_winner,
                 actual_winner,
+                actual_home_score,
+                actual_away_score,
                 ROUND(win_probability * 100, 0) AS win_pct,
                 su_correct,
                 ROUND(predicted_margin, 1) AS predicted_margin,
@@ -714,12 +716,21 @@ if df is not None:
                 )
                 log['Cover Pick'] = log['cover_pick']
 
+                def fmt_score(row):
+                    h, a = row['actual_home_score'], row['actual_away_score']
+                    if pd.isna(h) or pd.isna(a):
+                        return '—'
+                    h, a = int(h), int(a)
+                    return f"{max(h,a)}-{min(h,a)}"
+
+                log['Score'] = log.apply(fmt_score, axis=1)
+
                 # Sort: ATS Ws first, then Ls, then no-spread; newest games first within each group
                 ats_sort = {'W': 0, 'L': 1, '—': 2}
                 log['ats_sort'] = log['ATS'].map(ats_sort).fillna(2)
                 log = log.sort_values(['ats_sort', 'game_date'], ascending=[True, False])
 
-                display_log = log[['ATS', 'SU', 'Date', 'Matchup', 'Conf',
+                display_log = log[['ATS', 'SU', 'Date', 'Matchup', 'Score', 'Conf',
                                    'Predicted', 'Win %', 'Actual',
                                    'Pred Margin', 'Actual Margin', 'Error', 'Cover Pick']]
 
