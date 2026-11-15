@@ -382,6 +382,8 @@ def generate_predictions(models, games, ratings_df, spreads=None):
         home_match = find_team_match(game['home_team'], ratings_df)
         away_match = find_team_match(game['away_team'], ratings_df)
         if not home_match or not away_match:
+            missing = game['home_team'] if not home_match else game['away_team']
+            print(f"  SKIP (no KenPom match): {game['away_team']} @ {game['home_team']}  — unmatched: {missing}")
             continue
 
         h = ratings_df[ratings_df['team_name'] == home_match]
