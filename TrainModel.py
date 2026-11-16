@@ -85,6 +85,15 @@ XGBOOST_PARAMS = {
 }
 
 
+def name_key(team):
+    """
+    Team-name key for joining ESPN names with names stored in Databricks. The insert code
+    escapes ' as '' — Spark SQL reads 'Saint Mary''s' as two adjacent literals and drops the
+    apostrophe, so stored names lack it ("Saint Marys Gaels").
+    """
+    return team.replace("'", "")
+
+
 def db_connect():
     return sql.connect(
         server_hostname=DATABRICKS_HOST,
@@ -134,7 +143,7 @@ def load_point_in_time_ratings(cursor, start, end):
     """)
     pit = {}
     for r in cursor.fetchall():
-        pit.setdefault((r[1], r[2]), []).append((r[0], {
+        pit.setdefault((name_key(r[1]), name_key(r[2])), []).append((r[0], {
             'home_adj_o': float(r[3]), 'home_adj_d': float(r[4]), 'home_adj_em': float(r[5]),
             'away_adj_o': float(r[6]), 'away_adj_d': float(r[7]), 'away_adj_em': float(r[8]),
         }))
@@ -175,7 +184,7 @@ def sync_current_season(ratings_df):
                    'away_adj_o': a['adj_o'], 'away_adj_d': a['adj_d'], 'away_adj_em': a['adj_em'], 'away_tempo': a['tempo'],
                    'ratings_point_in_time': False}
             gd = date.fromisoformat(g['game_date'])
-            for pdate, vals in pit.get((g['home_team'], g['away_team']), []):
+            for pdate, vals in pit.get((name_key(g['home_team']), name_key(g['away_team'])), []):
                 if abs((pdate - gd).days) <= 1:
                     rec.update(vals)
                     rec['ratings_point_in_time'] = True
@@ -467,7 +476,7 @@ def fetch_spreads_from_history(game_date):
         rows = cursor.fetchall()
         cursor.close()
         conn.close()
-        return {(r[0], r[1]): float(r[2]) for r in rows}
+        return {(name_key(r[0]), name_key(r[1])): float(r[2]) for r in rows}
     except Exception:
         return {}
 
@@ -554,7 +563,7 @@ def generate_predictions(models, games, ratings_df, state, spreads=None):
         pred_away = (pred_total - pred_margin) / 2
         win_prob = float(1 / (1 + np.exp(-pred_margin / 10)))
 
-        spread = spreads.get((game['home_team'], game['away_team']))  # None = no line, 0 = pick 'em
+        spread = spreads.get((name_key(game['home_team']), name_key(game['away_team'])))  # None = no line, 0 = pick 'em
         ats_edge = abs(pred_margin + spread) if spread is not None else None
         if ats_edge is None:
             ats_conf = 'Low'
