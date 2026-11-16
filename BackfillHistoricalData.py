@@ -1,9 +1,13 @@
 """
 Backfill Historical Game Features for ML Training
 Fetches ESPN game results + KenPom ratings for seasons 2024-2026 and stores
-pre-joined features in workspace.default.historical_game_features.
+pre-joined features in workspace.default.ml_game_features.
 
-Run once to seed the ML training table, then TrainModel.py nightly handles the rest.
+Every completed ESPN game is stored (including non-D1 opponents, with NULL KenPom
+features) so per-team schedules — rest days, pregame ratings — are complete.
+Historical KenPom ratings are season-end (ratings_point_in_time = FALSE).
+
+Run once to seed the ML training table; TrainModel.py syncs the current season nightly.
 """
 
 import sys
@@ -38,6 +42,15 @@ SEASONS = {
 
 SLEEP_BETWEEN_DATES = 0.2
 
+FEATURE_TABLE = 'workspace.default.ml_game_features'
+FEATURE_COLUMNS = [
+    ('season', 'INT'), ('game_date', 'DATE'), ('home_team', 'STRING'), ('away_team', 'STRING'),
+    ('actual_home_score', 'INT'), ('actual_away_score', 'INT'), ('neutral_site', 'BOOLEAN'),
+    ('home_adj_o', 'DOUBLE'), ('home_adj_d', 'DOUBLE'), ('home_adj_em', 'DOUBLE'), ('home_tempo', 'DOUBLE'),
+    ('away_adj_o', 'DOUBLE'), ('away_adj_d', 'DOUBLE'), ('away_adj_em', 'DOUBLE'), ('away_tempo', 'DOUBLE'),
+    ('ratings_point_in_time', 'BOOLEAN'),
+]
+
 
 def fetch_kenpom_for_season(year):
     """
@@ -46,6 +59,7 @@ def fetch_kenpom_for_season(year):
       adj_o = Tempo-Adj column
       adj_d = Off. Efficiency-Adj.Rank column
       adj_em = adj_o - adj_d
+      tempo = Def. Efficiency-Raw column (verified vs kenpom.com: Alabama 75.9)
     """
     print(f"  Fetching KenPom {year}...")
     try:
@@ -58,21 +72,25 @@ def fetch_kenpom_for_season(year):
 
         adj_o_col  = 'Tempo-Adj'
         adj_d_col  = 'Off. Efficiency-Adj.Rank'
+        tempo_col  = 'Def. Efficiency-Raw'
 
-        if adj_o_col not in df.columns or adj_d_col not in df.columns:
+        if any(c not in df.columns for c in (adj_o_col, adj_d_col, tempo_col)):
             print(f"    Missing columns. Available: {df.columns.tolist()}")
             return pd.DataFrame()
 
         df['adj_o']  = pd.to_numeric(df[adj_o_col], errors='coerce')
         df['adj_d']  = pd.to_numeric(df[adj_d_col], errors='coerce')
         df['adj_em'] = df['adj_o'] - df['adj_d']
+        df['tempo']  = pd.to_numeric(df[tempo_col], errors='coerce')
 
         # Keep only teams with plausible values
-        df = df[df['adj_o'].between(70, 150) & df['adj_d'].between(70, 150)].copy()
-        df = df[['team_name', 'adj_o', 'adj_d', 'adj_em']].dropna()
+        df = df[df['adj_o'].between(70, 150) & df['adj_d'].between(70, 150)
+                & df['tempo'].between(55, 85)].copy()
+        df = df[['team_name', 'adj_o', 'adj_d', 'adj_em', 'tempo']].dropna()
 
         print(f"    Got {len(df)} teams  (adj_o range {df['adj_o'].min():.1f}–{df['adj_o'].max():.1f}, "
-              f"adj_em range {df['adj_em'].min():.1f}–{df['adj_em'].max():.1f})")
+              f"adj_em range {df['adj_em'].min():.1f}–{df['adj_em'].max():.1f}, "
+              f"tempo range {df['tempo'].min():.1f}–{df['tempo'].max():.1f})")
         return df
 
     except Exception as e:
@@ -113,6 +131,7 @@ def fetch_espn_games_for_date(date_str, retries=3):
                         'away_team':         away,
                         'actual_home_score': home_score,
                         'actual_away_score': away_score,
+                        'neutral_site':      bool(event['competitions'][0].get('neutralSite', False)),
                     })
             return games
         except Exception:
@@ -121,29 +140,30 @@ def fetch_espn_games_for_date(date_str, retries=3):
     return []
 
 
-def attach_kenpom_features(games, kenpom_df):
-    """Join game records with KenPom ratings via team name matching."""
+def team_ratings(espn_name, kenpom_df):
+    """KenPom ratings dict for an ESPN team name, or all-None if no D1 match."""
+    match = find_team_match(espn_name, kenpom_df)
+    row = kenpom_df[kenpom_df['team_name'] == match] if match else kenpom_df.iloc[0:0]
+    if row.empty:
+        return {'adj_o': None, 'adj_d': None, 'adj_em': None, 'tempo': None}
+    row = row.iloc[0]
+    return {k: float(row[k]) for k in ('adj_o', 'adj_d', 'adj_em', 'tempo')}
+
+
+def attach_kenpom_features(games, kenpom_df, point_in_time=False):
+    """
+    Join game records with KenPom ratings via team name matching.
+    Keeps every game (NULL features for non-D1 sides) so team schedules stay complete.
+    """
     result = []
     for game in games:
-        home_match = find_team_match(game['home_team'], kenpom_df)
-        away_match = find_team_match(game['away_team'], kenpom_df)
-        if not home_match or not away_match:
-            continue
-
-        h = kenpom_df[kenpom_df['team_name'] == home_match]
-        a = kenpom_df[kenpom_df['team_name'] == away_match]
-        if h.empty or a.empty:
-            continue
-        h, a = h.iloc[0], a.iloc[0]
-
+        h = team_ratings(game['home_team'], kenpom_df)
+        a = team_ratings(game['away_team'], kenpom_df)
         result.append({
             **game,
-            'home_adj_o':  float(h['adj_o']),
-            'home_adj_d':  float(h['adj_d']),
-            'home_adj_em': float(h['adj_em']),
-            'away_adj_o':  float(a['adj_o']),
-            'away_adj_d':  float(a['adj_d']),
-            'away_adj_em': float(a['adj_em']),
+            'home_adj_o': h['adj_o'], 'home_adj_d': h['adj_d'], 'home_adj_em': h['adj_em'], 'home_tempo': h['tempo'],
+            'away_adj_o': a['adj_o'], 'away_adj_d': a['adj_d'], 'away_adj_em': a['adj_em'], 'away_tempo': a['tempo'],
+            'ratings_point_in_time': point_in_time,
         })
     return result
 
@@ -157,10 +177,13 @@ def db_connect():
     )
 
 
-def upload_season_features(records, season):
-    """Upload pre-joined game features to workspace.default.historical_game_features."""
+def upload_features(records, season, delete_where):
+    """
+    Write game feature rows to FEATURE_TABLE, first deleting rows matching `delete_where`
+    (a SQL predicate) so re-runs are idempotent. Used by the backfill and TrainModel's nightly sync.
+    """
     if not records:
-        print(f"  No matched records for {season}")
+        print(f"  No records for {season}")
         return 0
 
     df = pd.DataFrame(records)
@@ -183,41 +206,28 @@ def upload_season_features(records, season):
         conn = db_connect()
         cursor = conn.cursor()
 
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS workspace.default.historical_game_features (
-                season INT,
-                game_date DATE,
-                home_team STRING,
-                away_team STRING,
-                actual_home_score INT,
-                actual_away_score INT,
-                home_adj_o  DOUBLE,
-                home_adj_d  DOUBLE,
-                home_adj_em DOUBLE,
-                away_adj_o  DOUBLE,
-                away_adj_d  DOUBLE,
-                away_adj_em DOUBLE
+        cols_sql = ',\n                '.join(f'{c} {t}' for c, t in FEATURE_COLUMNS)
+        cursor.execute(f"""
+            CREATE TABLE IF NOT EXISTS {FEATURE_TABLE} (
+                {cols_sql}
             ) USING DELTA
         """)
 
-        cursor.execute(f"DELETE FROM workspace.default.historical_game_features WHERE season = {season}")
+        cursor.execute(f"DELETE FROM {FEATURE_TABLE} WHERE {delete_where}")
 
-        col_order = ['season', 'game_date', 'home_team', 'away_team',
-                     'actual_home_score', 'actual_away_score',
-                     'home_adj_o', 'home_adj_d', 'home_adj_em',
-                     'away_adj_o', 'away_adj_d', 'away_adj_em']
+        col_order = [c for c, _ in FEATURE_COLUMNS]
         for col in col_order:
             if col not in df.columns:
                 df[col] = None
 
-        batch_size = 100
+        batch_size = 200
         for i in range(0, len(df), batch_size):
             batch = df[col_order].iloc[i:i+batch_size]
             vals = []
             for _, row in batch.iterrows():
                 parts = [safe(row[c]) for c in col_order]
                 vals.append(f"({', '.join(parts)})")
-            cursor.execute(f"INSERT INTO workspace.default.historical_game_features VALUES {', '.join(vals)}")
+            cursor.execute(f"INSERT INTO {FEATURE_TABLE} ({', '.join(col_order)}) VALUES {', '.join(vals)}")
 
         cursor.close()
         conn.close()
@@ -264,23 +274,24 @@ def main():
             games = fetch_espn_games_for_date(date_str)
 
             if games:
-                matched = attach_kenpom_features(games, kenpom_df)
-                all_records.extend(matched)
+                records = attach_kenpom_features(games, kenpom_df)
+                all_records.extend(records)
                 games_found += len(games)
 
             current    += timedelta(days=1)
             dates_done += 1
 
             if dates_done % 30 == 0:
-                print(f"  {dates_done}/{total_dates} dates  |  "
-                      f"{games_found} games  |  {len(all_records)} matched")
+                print(f"  {dates_done}/{total_dates} dates  |  {games_found} games")
 
             time.sleep(SLEEP_BETWEEN_DATES)
 
-        rate = len(all_records) / games_found * 100 if games_found else 0
-        print(f"  Done: {games_found} games, {len(all_records)} matched ({rate:.0f}%)")
+        both_d1 = sum(1 for r in all_records if r['home_adj_em'] is not None and r['away_adj_em'] is not None)
+        neutral = sum(1 for r in all_records if r['neutral_site'])
+        rate = both_d1 / games_found * 100 if games_found else 0
+        print(f"  Done: {games_found} games, {both_d1} D1-vs-D1 with features ({rate:.0f}%), {neutral} neutral-site")
 
-        total += upload_season_features(all_records, season)
+        total += upload_features(all_records, season, delete_where=f"season = {season}")
 
     print(f"\n{'=' * 70}")
     print(f"Backfill complete — {total} total records")

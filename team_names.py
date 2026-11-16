@@ -105,6 +105,7 @@ ESPN_TO_KENPOM = {
     'Miami': 'Miami FL',  # ESPN "Miami Hurricanes" — was → 'Miami OH'
     'Miami (OH)': 'Miami OH',  # needed so the 'Miami' prefix key doesn't catch the RedHawks
     'NC State': 'N.C. State',  # was → 'Providence'
+    'Pennsylvania': 'Penn',    # ESPN "Pennsylvania Quakers" — was unmatched (KenPom name too short for fallback)
 }
 
 # Common abbreviation mappings (ESPN first word → KenPom name)

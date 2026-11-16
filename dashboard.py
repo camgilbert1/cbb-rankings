@@ -450,19 +450,32 @@ def load_ml_performance():
             _socket_timeout=900
         )
         cursor = connection.cursor()
-        cursor.execute("""
-            SELECT ats_confidence,
-                   COUNT(*) AS total,
-                   SUM(ml_ats_correct) AS wins
-            FROM workspace.default.ml_predictions
-            WHERE ml_ats_correct IS NOT NULL
-              AND ats_confidence IS NOT NULL
-            GROUP BY ats_confidence
-        """)
+        try:
+            cursor.execute("""
+                SELECT COALESCE(model_family, 'v1') AS family, ats_confidence,
+                       COUNT(*) AS total, SUM(ml_ats_correct) AS wins
+                FROM workspace.default.ml_predictions
+                WHERE ml_ats_correct IS NOT NULL AND ats_confidence IS NOT NULL
+                GROUP BY 1, 2
+            """)
+        except Exception:
+            # model_family column not created yet (added by TrainModel on its first v2 run)
+            cursor.execute("""
+                SELECT 'v1' AS family, ats_confidence,
+                       COUNT(*) AS total, SUM(ml_ats_correct) AS wins
+                FROM workspace.default.ml_predictions
+                WHERE ml_ats_correct IS NOT NULL AND ats_confidence IS NOT NULL
+                GROUP BY 2
+            """)
         rows = cursor.fetchall()
         cursor.close()
         connection.close()
-        return {r[0]: {'total': int(r[1]), 'wins': int(r[2]), 'losses': int(r[1]) - int(r[2])} for r in rows}
+        # {family: {confidence: {total, wins, losses}}}
+        perf = {}
+        for family, conf, total, wins in rows:
+            perf.setdefault(family, {})[conf] = {'total': int(total), 'wins': int(wins),
+                                                 'losses': int(total) - int(wins)}
+        return perf
     except Exception:
         return {}
 
@@ -1110,26 +1123,43 @@ if df is not None:
     # =========================================================================
     with tab5:
         st.subheader("🤖 ML Model Predictions (XGBoost)")
-        st.markdown("*Trained nightly on 3+ seasons of KenPom efficiency data. "
-                    "Predicts margin and total score separately.*")
+        st.markdown("*Margin model trained nightly on 3+ seasons of KenPom efficiency/tempo, home court, "
+                    "rest days and pregame form. Totals use KenPom's tempo-based formula.*")
 
         with st.spinner("Loading ML predictions..."):
             ml_preds   = load_ml_predictions()
             metadata   = load_model_metadata()
             ml_perf    = load_ml_performance()
 
-        # ATS record by confidence
-        st.markdown("### ML Model ATS Record")
-        col1, col2, col3 = st.columns(3)
+        # ATS record by confidence — current model (v2) tracked separately from the previous model
+        ATS_BREAKEVEN = 52.4  # win % needed to profit at standard -110 pricing
+        current = ml_perf.get('v2', {})
+        st.markdown("### ML Model ATS Record (current model)")
+        col0, col1, col2, col3 = st.columns(4)
+        with col0:
+            tot = sum(p['total'] for p in current.values())
+            if tot:
+                wins = sum(p['wins'] for p in current.values())
+                pct = wins / tot * 100
+                st.metric("All picks", f"{wins}-{tot - wins} ({pct:.1f}%)",
+                          delta=f"{pct - ATS_BREAKEVEN:+.1f} pts vs {ATS_BREAKEVEN}% break-even")
+            else:
+                st.metric("All picks", "0-0", delta="no results yet")
         for col_widget, conf, emoji in [(col1, 'High', '🟢'), (col2, 'Medium', '🟡'), (col3, 'Low', '🔴')]:
             with col_widget:
-                if conf in ml_perf and ml_perf[conf]['total'] > 0:
-                    p = ml_perf[conf]
+                if conf in current and current[conf]['total'] > 0:
+                    p = current[conf]
                     pct = p['wins'] / p['total'] * 100
                     st.metric(f"{emoji} {conf} Confidence", f"{p['wins']}-{p['losses']} ({pct:.0f}%)",
                               delta=f"{p['total']} games graded")
                 else:
                     st.metric(f"{emoji} {conf} Confidence", "0-0", delta="no results yet")
+        st.caption(f"Break-even at -110 is {ATS_BREAKEVEN}%. High = 8+ pt edge vs the spread, "
+                   "Medium = 4–8, Low = under 4. Small samples swing a lot — judge after a few hundred picks.")
+        prev = ml_perf.get('v1', {})
+        if prev:
+            parts = [f"{c} {prev[c]['wins']}-{prev[c]['losses']}" for c in ('High', 'Medium', 'Low') if c in prev]
+            st.caption("Previous model (v1): " + " · ".join(parts))
         st.markdown("---")
 
         # Model metadata cards
@@ -1145,9 +1175,14 @@ if df is not None:
                     _, version, n_games, xgb_rmse, ridge_rmse, weights_str, created_at = row
                     with col_widget:
                         st.markdown(f"**{label}**")
-                        st.metric("XGBoost CV RMSE", f"{xgb_rmse:.2f} pts")
+                        st.metric("XGBoost CV RMSE (shuffled CV)", f"{xgb_rmse:.2f} pts")
                         st.caption(f"Ridge baseline: {ridge_rmse:.2f} pts  |  "
                                    f"Trained on {n_games:,} games  |  v{version}")
+                        if model_key == 'total_model':
+                            st.caption("Not used for published totals (KenPom tempo formula is used); "
+                                       "kept for comparison.")
+            st.caption("Shuffled CV mixes seasons and reads optimistic; held-out current-season "
+                       "margin RMSE was ~12.5 pts in Nov 2026 testing (EvaluateModel.py).")
             st.markdown("---")
 
         # Today's predictions table
