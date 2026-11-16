@@ -422,6 +422,7 @@ def upload_predictions_to_databricks(predictions_df):
             away_team_escaped = row['away_team'].replace("'", "''")
             predicted_winner_escaped = row['predicted_winner'].replace("'", "''")
             cover_pick_escaped = row['cover_pick'].replace("'", "''")
+            spread_sql = 'NULL' if pd.isna(row['vegas_spread']) else row['vegas_spread']
 
             cursor.execute(f"""
                 INSERT INTO workspace.default.prediction_history VALUES (
@@ -434,7 +435,7 @@ def upload_predictions_to_databricks(predictions_df):
                     {row['predicted_home_score']},
                     {row['predicted_away_score']},
                     '{row['confidence']}',
-                    {row['vegas_spread']},
+                    {spread_sql},
                     '{cover_pick_escaped}',
                     '{row['cover_confidence']}',
                     current_timestamp(),
@@ -546,13 +547,20 @@ def main(date=None):
         # Calculate cover pick (Against The Spread)
         predicted_margin = prediction['predicted_home_score'] - prediction['predicted_away_score']
 
-        if home_spread is not None and home_spread != 0:
+        # Fall back to the away line if only the away team's name matched the Odds API
+        if home_spread is None and away_spread is not None:
+            home_spread = -away_spread
+
+        # home_spread None = no line found; 0.0 = genuine pick 'em
+        if home_spread is not None:
             # Adjusted margin = predicted margin accounting for spread
             # Positive = home covers, negative = away covers
             adjusted_margin = predicted_margin + home_spread
 
             # Determine cover pick
-            if adjusted_margin > 0:
+            if home_spread == 0:
+                cover_pick = f"{home_team if adjusted_margin > 0 else away_team} PK"
+            elif adjusted_margin > 0:
                 cover_pick = f"{home_team} {home_spread:+.1f}"
             else:
                 cover_pick = f"{away_team} {-home_spread:+.1f}"
@@ -574,7 +582,10 @@ def main(date=None):
         print(f"Predicted Score: {home_team} {prediction['predicted_home_score']}, {away_team} {prediction['predicted_away_score']}")
         if home_spread is not None:
             # Show the favored team with the spread (home_spread < 0 means home favored)
-            spread_text = f"{home_team} {home_spread:+.1f}" if home_spread < 0 else f"{away_team} {-home_spread:+.1f}"
+            if home_spread == 0:
+                spread_text = "Pick 'em"
+            else:
+                spread_text = f"{home_team} {home_spread:+.1f}" if home_spread < 0 else f"{away_team} {-home_spread:+.1f}"
             print(f"Vegas Spread: {spread_text}")
             print(f"Cover Pick: {cover_pick} (Confidence: {cover_confidence})")
         print(f"Confidence Level: {prediction['confidence']}")
@@ -604,7 +615,7 @@ def main(date=None):
             'predicted_home_score': prediction['predicted_home_score'],
             'predicted_away_score': prediction['predicted_away_score'],
             'confidence': prediction['confidence'],
-            'vegas_spread': home_spread if home_spread is not None else 0.0,
+            'vegas_spread': home_spread,  # None = no line (stored NULL); 0.0 = pick 'em
             'cover_pick': cover_pick,
             'cover_confidence': cover_confidence,
             'home_adj_em': features['home_adj_em'] if features else 0.0,

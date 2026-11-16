@@ -230,7 +230,7 @@ def update_prediction_outcomes():
                      CASE WHEN r.home_score > r.away_score THEN p.home_team ELSE p.away_team END
                      THEN 1 ELSE 0 END AS su_correct,
                 CASE
-                    WHEN p.vegas_spread = 0 THEN NULL
+                    WHEN p.vegas_spread IS NULL THEN NULL  -- no line; 0 = pick 'em is graded
                     WHEN (p.predicted_home_score - p.predicted_away_score + p.vegas_spread) > 0
                          AND (r.home_score - r.away_score + p.vegas_spread) > 0 THEN 1
                     WHEN (p.predicted_home_score - p.predicted_away_score + p.vegas_spread) <= 0
@@ -293,7 +293,7 @@ def update_ml_ats_results():
             game_date, home, away, pred_margin, spread, actual_home, actual_away = row
             actual_margin = actual_home - actual_away
 
-            if spread and spread != 0:
+            if spread is not None:  # 0 = pick 'em (graded); NULL = no line
                 ml_pick_home     = (pred_margin + spread) > 0
                 actual_home_covers = (actual_margin + spread) > 0
                 if (actual_margin + spread) == 0:

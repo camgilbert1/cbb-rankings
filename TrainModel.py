@@ -462,7 +462,7 @@ def fetch_spreads_from_history(game_date):
         cursor.execute(f"""
             SELECT home_team, away_team, vegas_spread
             FROM workspace.default.prediction_history
-            WHERE game_date = '{game_date}' AND vegas_spread != 0
+            WHERE game_date = '{game_date}' AND vegas_spread IS NOT NULL
         """)
         rows = cursor.fetchall()
         cursor.close()
@@ -554,8 +554,8 @@ def generate_predictions(models, games, ratings_df, state, spreads=None):
         pred_away = (pred_total - pred_margin) / 2
         win_prob = float(1 / (1 + np.exp(-pred_margin / 10)))
 
-        spread = spreads.get((game['home_team'], game['away_team']), 0.0)
-        ats_edge = abs(pred_margin + spread) if spread != 0 else None
+        spread = spreads.get((game['home_team'], game['away_team']))  # None = no line, 0 = pick 'em
+        ats_edge = abs(pred_margin + spread) if spread is not None else None
         if ats_edge is None:
             ats_conf = 'Low'
         elif ats_edge >= ATS_CONFIDENCE_HIGH:
@@ -628,7 +628,7 @@ def upload_predictions(records):
                     {rec['ml_predicted_margin']}, {rec['ml_predicted_total']},
                     {rec['ml_win_probability']}, '{rec['model_version']}',
                     current_timestamp(),
-                    {rec['vegas_spread']}, '{rec['ats_confidence']}',
+                    {'NULL' if rec['vegas_spread'] is None else rec['vegas_spread']}, '{rec['ats_confidence']}',
                     NULL, NULL, NULL, '{MODEL_FAMILY}'
                 )
             """)

@@ -118,7 +118,7 @@ def load_outcome_baselines():
     df = cur.fetchall_arrow().to_pandas()
     cur.close(); conn.close()
     df['game_date'] = pd.to_datetime(df['game_date'])
-    df['vegas_margin'] = np.where(df['vegas_spread'] != 0, -df['vegas_spread'], np.nan)  # spread is home line
+    df['vegas_margin'] = -df['vegas_spread']  # spread is home line; NULL (no line) stays NaN
     return df.rename(columns={'predicted_margin': 'formula_margin'})[
         ['game_date', 'home_team', 'away_team', 'formula_margin', 'vegas_margin']]
 

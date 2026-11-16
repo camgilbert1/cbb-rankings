@@ -151,6 +151,9 @@ ESPN_TO_ODDS = {
     'Kansas City Roos': 'UMKC Kangaroos',
     'Grand Canyon Lopes': 'Grand Canyon Antelopes',
     'Texas A&M-Corpus Christi Islanders': 'Texas A&M-CC Islanders',
+    'Long Island University Sharks': 'LIU Sharks',
+    'St. Thomas Tommies': 'St. Thomas (MN) Tommies',
+    'Grambling Tigers': 'Grambling St Tigers',
 }
 
 # BracketMatrix team name → KenPom name

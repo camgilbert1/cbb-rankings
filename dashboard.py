@@ -589,7 +589,7 @@ def load_game_log(time_period):
                 ats_correct
             FROM workspace.default.prediction_outcomes
             WHERE su_correct IS NOT NULL
-              AND vegas_spread != 0
+              AND vegas_spread IS NOT NULL
             {date_filter}
             ORDER BY game_date DESC, home_team
         """)
@@ -834,10 +834,11 @@ if df is not None:
     # =========================================================================
     with tab2:
         if not predictions_df.empty:
-            st.subheader(f"🎯 Game Predictions ({len(predictions_df[predictions_df['vegas_spread'] != 0])} games)")
+            # vegas_spread NULL = no line (non-D1 / not posted) → hidden; 0 = pick 'em → shown
+            has_line = predictions_df['vegas_spread'].notna()
+            st.subheader(f"🎯 Game Predictions ({int(has_line.sum())} games)")
 
-            # Create compact display dataframe — exclude games with no spread (non-D1 / no line)
-            display_predictions = predictions_df[predictions_df['vegas_spread'] != 0].copy()
+            display_predictions = predictions_df[has_line].copy()
 
             # Format date column
             display_predictions['Date'] = pd.to_datetime(display_predictions['game_date']).dt.strftime('%a %b %d').str.lstrip('0')
@@ -891,7 +892,7 @@ if df is not None:
                 lambda row: (
                     f"{row['home_team']} {row['vegas_spread']:.1f}" if row['vegas_spread'] < 0
                     else f"{row['away_team']} -{row['vegas_spread']:.1f}" if row['vegas_spread'] > 0
-                    else "N/A"
+                    else "Pick 'em"
                 ),
                 axis=1
             )
@@ -913,7 +914,7 @@ if df is not None:
             # Scale of 8 pts → 0pt edge = 50%, 8pt edge ≈ 73%, 16pt edge ≈ 88%
             import math
             def cover_prob(row):
-                if pd.isna(row['predicted_home_score']) or pd.isna(row['predicted_away_score']) or row['vegas_spread'] == 0:
+                if pd.isna(row['predicted_home_score']) or pd.isna(row['predicted_away_score']) or pd.isna(row['vegas_spread']):
                     return '-'
                 raw = (row['predicted_home_score'] - row['predicted_away_score']) + row['vegas_spread']
                 prob_home = 1 / (1 + math.exp(-raw / 8))
@@ -925,7 +926,7 @@ if df is not None:
             # Calculate actual ATS result (if game is final)
             def get_ats_result(row):
                 if pd.notna(row['actual_home_score']) and pd.notna(row['actual_away_score']):
-                    if row['vegas_spread'] == 0:
+                    if pd.isna(row['vegas_spread']):
                         return "No spread"
 
                     actual_margin = row['actual_home_score'] - row['actual_away_score']
@@ -1202,17 +1203,22 @@ if df is not None:
             display['Total']  = display['ml_predicted_total'].apply(lambda x: f"{x:.0f}")
             display['Win %']  = display['ml_win_probability'].apply(lambda x: f"{x:.0%}")
 
+            # vegas_spread NULL = no line; 0 = pick 'em
             def fmt_spread(row):
                 s = row.get('vegas_spread')
-                if s is None or pd.isna(s) or s == 0:
+                if s is None or pd.isna(s):
                     return '—'
+                if s == 0:
+                    return "Pick 'em"
                 return f"{row['home_team']} {s:.1f}" if s < 0 else f"{row['away_team']} -{s:.1f}"
 
             def ml_ats_pick(row):
                 s = row.get('vegas_spread')
-                if s is None or pd.isna(s) or s == 0:
+                if s is None or pd.isna(s):
                     return '—'
                 edge = row['ml_predicted_margin'] + s
+                if s == 0:
+                    return f"{row['home_team'] if edge > 0 else row['away_team']} PK"
                 if edge > 0:
                     # home covers — s is their spread (negative if favored, positive if dog)
                     spread_str = f"{s:.1f}" if s < 0 else f"+{s:.1f}"
@@ -1225,7 +1231,7 @@ if df is not None:
 
             def ats_edge(row):
                 s = row.get('vegas_spread')
-                if s is None or pd.isna(s) or s == 0:
+                if s is None or pd.isna(s):
                     return None
                 return abs(row['ml_predicted_margin'] + s)
 
