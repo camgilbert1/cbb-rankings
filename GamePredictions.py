@@ -246,7 +246,8 @@ def calculate_matchup_features(home_team, away_team, team_stats, neutral_site=Fa
         'away_adj_em': float(away_stats['adj_efficiency_margin']),
         'home_rank': int(home_stats['overall_rank']),
         'away_rank': int(away_stats['overall_rank']),
-        'expected_tempo': (float(home_stats['adj_tempo']) + float(away_stats['adj_tempo'])) / 2,
+        # KenPom possession estimate: home_tempo × away_tempo / national avg tempo
+        'expected_tempo': float(home_stats['adj_tempo']) * float(away_stats['adj_tempo']) / float(team_stats['adj_tempo'].mean()),
     }
 
     return features
