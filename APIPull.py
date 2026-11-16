@@ -7,12 +7,12 @@ Fetches current college basketball rankings from multiple sources:
 """
 
 import pandas as pd
-import requests
 import cloudscraper
 import kenpompy as kenpompy
 from kenpompy.summary import get_efficiency
 from databricks import sql
 import os
+import time
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -24,7 +24,14 @@ def login_kenpom(email: str, password: str):
     which broke when KenPom updated their UI.
     """
     browser = cloudscraper.create_scraper()
-    browser.get('https://kenpom.com/index.php')
+
+    def check_blocked(resp):
+        # Cloudflare blocks/challenges GitHub runner IPs intermittently — fail clearly instead of
+        # letting a block page pass the auth check and 403 later inside kenpompy.
+        if resp.status_code in (403, 429, 503) or 'just a moment' in resp.text[:2000].lower():
+            raise Exception(f'KenPom blocked request ({resp.status_code}) — likely Cloudflare')
+
+    check_blocked(browser.get('https://kenpom.com/index.php'))
 
     form_data = {
         'email': email,
@@ -32,13 +39,14 @@ def login_kenpom(email: str, password: str):
         'submit': 'Login!',
     }
 
-    browser.post(
+    check_blocked(browser.post(
         'https://kenpom.com/handlers/login_handler.php',
         data=form_data,
         allow_redirects=True
-    )
+    ))
 
     home_page = browser.get('https://kenpom.com/')
+    check_blocked(home_page)
     page_text = home_page.text.lower()
 
     authenticated = any(s in page_text for s in ['logout', 'log out', 'sign out', 'logged in'])
@@ -67,19 +75,25 @@ def fetch_kenpom_ratings(year=2026):
     Returns:
         pd.DataFrame: KenPom ratings data
     """
-    print(f"Logging into KenPom...")
+    attempts = 3
+    for attempt in range(1, attempts + 1):
+        try:
+            print(f"Logging into KenPom... (attempt {attempt}/{attempts})")
+            # Fresh session each attempt so a blocked/challenged session isn't reused
+            browser = login_kenpom(KENPOM_EMAIL, KENPOM_PASSWORD)
 
-    # Create browser session and login
-    browser = login_kenpom(KENPOM_EMAIL, KENPOM_PASSWORD)
+            print(f"Fetching {year} ratings...")
+            ratings_df = get_efficiency(browser, season=str(year))
 
-    print(f"Fetching {year} ratings...")
-
-    # Get current efficiency ratings (main KenPom table)
-    ratings_df = get_efficiency(browser, season=str(year))
-
-    print(f"Successfully fetched {len(ratings_df)} teams!")
-
-    return ratings_df
+            print(f"Successfully fetched {len(ratings_df)} teams!")
+            return ratings_df
+        except Exception as e:
+            print(f"  KenPom attempt {attempt} failed: {e}")
+            if attempt < attempts:
+                wait = 30 * attempt
+                print(f"  Retrying in {wait}s...")
+                time.sleep(wait)
+    raise Exception(f"KenPom fetch failed after {attempts} attempts")
 
 
 def upload_to_databricks(df, table_name, year):
@@ -212,8 +226,8 @@ def fetch_torvik_ratings(year=2027):
 
     try:
         url = f"https://barttorvik.com/trank.php?year={year}&json=1"
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-        response = requests.get(url, headers=headers, timeout=30)
+        scraper = cloudscraper.create_scraper()
+        response = scraper.get(url, timeout=30)
         response.raise_for_status()
 
         data = response.json()
@@ -378,7 +392,7 @@ def rebuild_gold_table(year=2027):
                 (TRY_CAST(Tempo_Adj AS DOUBLE) - TRY_CAST(Off__Efficiency_Adj_Rank AS DOUBLE))                            AS adj_efficiency_margin,
                 TRY_CAST(Tempo_Adj AS DOUBLE)                                                                              AS adj_offensive_efficiency,
                 TRY_CAST(Off__Efficiency_Adj_Rank AS DOUBLE)                                                               AS adj_defensive_efficiency,
-                68.0                                                                                                        AS adj_tempo,
+                COALESCE(TRY_CAST(Def__Efficiency_Raw AS DOUBLE), 68.0)                                                    AS adj_tempo,  -- kenpompy shift: adj tempo lands in Def. Efficiency-Raw (verified vs kenpom.com)
                 ROW_NUMBER() OVER (ORDER BY (TRY_CAST(Tempo_Adj AS DOUBLE) - TRY_CAST(Off__Efficiency_Adj_Rank AS DOUBLE)) DESC) AS overall_rank,
                 TRY_CAST(Off__Efficiency_Adj AS INT)                                                                       AS offensive_rank,
                 TRY_CAST(Def__Efficiency_Adj_Rank AS INT)                                                                  AS defensive_rank,
@@ -404,32 +418,39 @@ def main():
     # =============================================================================
 
     # 1. KenPom (PRIMARY DATA SOURCE)
-    kenpom_data = fetch_kenpom_ratings(year=2027)
+    try:
+        kenpom_data = fetch_kenpom_ratings(year=2027)
+    except Exception as e:
+        # Fallback: keep yesterday's KenPom + gold tables so predictions/results still run.
+        # ::warning:: makes this show up as an annotation on the GitHub Actions run.
+        print(f"::warning::KenPom refresh failed ({e}) — using existing Databricks KenPom/gold tables")
+        kenpom_data = pd.DataFrame()
 
-    # =============================================================================
-    # DISPLAY KENPOM DATA
-    # =============================================================================
+    if not kenpom_data.empty:
+        # =============================================================================
+        # DISPLAY KENPOM DATA
+        # =============================================================================
 
-    print("\n" + "="*80)
-    print("KENPOM RATINGS - First 10 Teams:")
-    print("="*80)
-    print(kenpom_data.head(10))
+        print("\n" + "="*80)
+        print("KENPOM RATINGS - First 10 Teams:")
+        print("="*80)
+        print(kenpom_data.head(10))
 
-    print("\n" + "="*80)
-    print("KENPOM - AVAILABLE COLUMNS:")
-    print("="*80)
-    print(kenpom_data.columns.tolist())
+        print("\n" + "="*80)
+        print("KENPOM - AVAILABLE COLUMNS:")
+        print("="*80)
+        print(kenpom_data.columns.tolist())
 
-    # =============================================================================
-    # SAVE DATA
-    # =============================================================================
+        # =============================================================================
+        # SAVE DATA
+        # =============================================================================
 
-    kenpom_file = "kenpom_ratings_2027.csv"
-    kenpom_data.to_csv(kenpom_file, index=False)
-    print(f"\n✓ KenPom data saved to: {kenpom_file}")
+        kenpom_file = "kenpom_ratings_2027.csv"
+        kenpom_data.to_csv(kenpom_file, index=False)
+        print(f"\n✓ KenPom data saved to: {kenpom_file}")
 
-    upload_to_databricks(kenpom_data, "kenpom_ratings", 2027)
-    rebuild_gold_table(year=2027)
+        upload_to_databricks(kenpom_data, "kenpom_ratings", 2027)
+        rebuild_gold_table(year=2027)
 
     # 2. Torvik T-Rank (ML FEATURE SOURCE - free API, no login)
     torvik_data = fetch_torvik_ratings(year=2027)
