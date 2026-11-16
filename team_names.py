@@ -13,6 +13,13 @@ NON_D1_SCHOOLS = {
     'Bryant & Stratton-Albany',  # → incorrectly matches 'Bryant' via first-word
     'William Paterson',          # → incorrectly matches 'William & Mary' via first-word
     'Virginia Lynchburg',        # → incorrectly matches 'Virginia' via containment
+    'Baptist (Fl)',              # → incorrectly matches 'Cal Baptist'
+    'College of Biblical Studies',  # → incorrectly matches 'Boston College'
+    'Northern New Mexico',       # → incorrectly matches 'Northern Kentucky'
+    'Penn State Lehigh Valley',  # branch campus → incorrectly matches 'Penn St.'
+    'Penn State Schuylkill',     # branch campus → incorrectly matches 'Penn St.'
+    "St. Mary's (MD)",           # → incorrectly matches 'Cal St. Fullerton'
+    'UT Dallas',                 # → incorrectly matches 'UT Arlington'
 }
 
 # ESPN school name (without mascot) → KenPom name
@@ -20,7 +27,7 @@ NON_D1_SCHOOLS = {
 ESPN_TO_KENPOM = {
     'UT Martin': 'Tennessee Martin',
     'Southeast Missouri State': 'Southeast Missouri St.',
-    'SIU Edwardsville': 'SIU Edwardsville',
+    'SIU Edwardsville': 'SIUE',  # KenPom name is 'SIUE'; old value fell through to 'Canisius'
     'UL Monroe': 'Louisiana Monroe',
     'Ole Miss': 'Mississippi',
     'Utah State': 'Utah St.',
@@ -93,6 +100,11 @@ ESPN_TO_KENPOM = {
     'Alabama A&M': 'Alabama A&M',
     'Jackson State': 'Jackson St.',
     'Towson State': 'Towson St.',
+    'Long Island': 'LIU',  # ESPN "Long Island University" → first-word fallback hit 'Long Beach St.'
+    'East Tennessee State': 'East Tennessee St.',  # was → 'East Carolina'
+    'Miami': 'Miami FL',  # ESPN "Miami Hurricanes" — was → 'Miami OH'
+    'Miami (OH)': 'Miami OH',  # needed so the 'Miami' prefix key doesn't catch the RedHawks
+    'NC State': 'N.C. State',  # was → 'Providence'
 }
 
 # Common abbreviation mappings (ESPN first word → KenPom name)
