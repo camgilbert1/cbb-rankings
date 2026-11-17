@@ -628,6 +628,12 @@ def run_v3(models, df_v2, games_today, ratings_df, state, spreads):
         trust, desc = V3.fit_trust(df, CURRENT_SEASON, MARGIN_FEATURES, XGBOOST_PARAMS, weights_used)
         print(f"  Box model trained on {len(df)} games (box scores through {latest})")
         print(f"  Trust weights: {desc}")
+        try:   # current box-score team ratings for the website (BuildSite.py reads this)
+            os.makedirs(os.path.join('site', 'data'), exist_ok=True)
+            with open(os.path.join('site', 'data', 'box_ratings.json'), 'w') as fh:
+                json.dump({'through': str(latest), 'trust': desc, 'teams': B.export_team_ratings(bstate)}, fh)
+        except Exception as e:
+            print(f"  (could not write box ratings for the site: {e})")
 
         margin = models.get('margin_model')
         X = upcoming_feature_rows(games_today, ratings_df, state)

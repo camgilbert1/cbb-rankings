@@ -473,6 +473,24 @@ def upcoming_rows(games, state):
     return add_box_features(pd.DataFrame(rows)) if rows else pd.DataFrame()
 
 
+def export_team_ratings(state):
+    """Current box-score ratings per team (absolute values, per 100 possessions) for the website."""
+    r, played, names = state['final'], state['played'], state['names']
+    out = []
+    for i, tid in enumerate(r['ids']):
+        if tid not in names or played.get(tid, 0) == 0:
+            continue
+        row = {'id': int(tid), 'name': names[tid], 'gp': int(played.get(tid, 0)),
+               'tempo': round(float(r['mu_t'] + r['T'][i]), 1),
+               'prior_em': round(float(r['prior_o'][i] - r['prior_d'][i]), 1)}
+        for k, m in enumerate(METRICS):
+            row[f'o_{m}'] = round(float(r['mu'][k] + r['O'][i, k]), 1)
+            row[f'd_{m}'] = round(float(r['mu'][k] + r['D'][i, k]), 1)
+        row['em'] = round(row['o_eff'] - row['d_eff'], 1)
+        out.append(row)
+    return out
+
+
 def add_box_features(df):
     """Matchup features from the point-in-time ratings (works for historical and upcoming rows)."""
     df = df.copy()

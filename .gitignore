@@ -17,6 +17,7 @@ env/
 *.xlsx
 box_cache/
 *.parquet
+site/data/
 
 # OS files
 .DS_Store

@@ -70,6 +70,23 @@ jobs:
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
         run: python TrainModel.py
 
+      # Static website (site/) -> GitHub Pages. Runs even if an earlier step failed, so the site
+      # still refreshes with whatever data is in Databricks.
+      - name: Build website data
+        if: ${{ !cancelled() }}
+        timeout-minutes: 15
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_HTTP_PATH: ${{ secrets.DATABRICKS_HTTP_PATH }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+        run: python BuildSite.py
+
+      - name: Upload website
+        if: ${{ !cancelled() }}
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
       - name: Summary
         run: |
           echo "✅ Pipeline complete"
@@ -77,3 +94,18 @@ jobs:
           echo "🎯 Game predictions generated"
           echo "📈 Game results updated"
           echo "🤖 ML models retrained (v2 KenPom + v3 box-score blend)"
+
+  deploy-site:
+    needs: update-data
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4

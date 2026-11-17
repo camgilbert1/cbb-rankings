@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CBB Model Picks</title>
+  <meta name="description" content="College basketball predictions: KenPom formula, XGBoost (v2) and box-score blend (v3) picks against the spread, model scorecard, team ratings and results.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏀</text></svg>">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="#/picks"><span class="brand-ball">🏀</span><span>CBB<b>Model</b></span></a>
+      <nav class="tabs" id="tabs">
+        <a href="#/picks" data-route="picks">Picks</a>
+        <a href="#/scorecard" data-route="scorecard">Scorecard</a>
+        <a href="#/ratings" data-route="ratings">Ratings</a>
+        <a href="#/results" data-route="results">Results</a>
+      </nav>
+      <div class="updated" id="updated"></div>
+    </div>
+  </header>
+  <main id="app" class="container"><div class="loading">Loading…</div></main>
+  <footer class="footer container">
+    Formula = KenPom efficiency × tempo · v2 = XGBoost on KenPom, rest &amp; form · v3 = box-score ratings blended with v2.
+    Lines from The Odds API (home spread). Logos © ESPN. Not betting advice.
+  </footer>
+  <script src="app.js"></script>
+</body>
+</html>

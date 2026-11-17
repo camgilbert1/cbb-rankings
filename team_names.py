@@ -123,7 +123,8 @@ ESPN_ABBREV_TO_KENPOM = {
     'UNLV': 'Nevada-Las Vegas',
     'USC': 'Southern California',
     'SMU': 'Southern Methodist',
-    'TCU': 'Texas Christian',
+    'TCU': 'TCU',                # KenPom name is 'TCU'; 'Texas Christian' matched nothing
+    'Delaware State': 'Delaware St.',   # was falling through to 'Delaware'
     'BYU': 'Brigham Young',
     'UCF': 'Central Florida',
     'VCU': 'Virginia Commonwealth',
