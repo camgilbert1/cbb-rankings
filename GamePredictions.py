@@ -7,7 +7,9 @@ import pandas as pd
 import requests
 from databricks import sql
 import os
+from collections import Counter
 from datetime import datetime
+from statistics import median
 from dotenv import load_dotenv
 import pytz
 
@@ -29,16 +31,36 @@ from team_names import find_team_match, normalize_team_name_for_odds
 # DATA FETCHING
 # =============================================================================
 
-def get_vegas_spreads():
+def consensus_line(lines):
+    """Most common line across bookmakers; on a tie, the median rounded to the nearest half point."""
+    counts = Counter(lines)
+    top = max(counts.values())
+    modes = [v for v, c in counts.items() if c == top]
+    line = modes[0] if len(modes) == 1 else round(median(lines) * 2) / 2
+    return line + 0.0  # turn -0.0 into 0.0 (pick 'em)
+
+
+def get_vegas_spreads(game_date=None):
     """
-    Fetch Vegas spreads from The Odds API
+    Fetch Vegas spreads from The Odds API for games tipping off on game_date.
+
+    The feed covers several days of games. Only games whose tip-off falls on game_date (Eastern)
+    are kept, so a team's next game can't overwrite today's line. Each game's line is the
+    consensus (most common) home spread across bookmakers.
+
+    Args:
+        game_date (str): YYYYMMDD, Eastern time. Defaults to today.
 
     Returns:
-        dict: Team name to spread mapping
+        dict: Odds API team name -> that team's spread (negative = favorite)
     """
     if not ODDS_API_KEY:
         print("⚠️  No Odds API key found, spreads will not be available")
         return {}
+
+    eastern = pytz.timezone('US/Eastern')
+    if game_date is None:
+        game_date = datetime.now(eastern).strftime('%Y%m%d')
 
     try:
         url = "https://api.the-odds-api.com/v4/sports/basketball_ncaab/odds/"
@@ -58,28 +80,40 @@ def get_vegas_spreads():
 
         data = response.json()
 
-        # Build mapping of team names to spreads
+        # Build mapping of team names to spreads (today's games only)
         spreads = {}
+        other_days = 0
         for game in data:
+            tip = datetime.fromisoformat(game['commence_time'].replace('Z', '+00:00')).astimezone(eastern)
+            if tip.strftime('%Y%m%d') != game_date:
+                other_days += 1
+                continue
             home_team = game['home_team']
             away_team = game['away_team']
 
-            # Get the first bookmaker's spread (usually consensus)
-            if game.get('bookmakers') and len(game['bookmakers']) > 0:
-                bookmaker = game['bookmakers'][0]
-                markets = bookmaker.get('markets', [])
+            # Home spread from every bookmaker that posts one
+            lines = []
+            for bookmaker in game.get('bookmakers', []):
+                for market in bookmaker.get('markets', []):
+                    if market['key'] != 'spreads':
+                        continue
+                    point = next((o.get('point') for o in market['outcomes'] if o['name'] == home_team), None)
+                    if point is not None:
+                        lines.append(float(point))
+            if not lines:
+                continue
 
-                for market in markets:
-                    if market['key'] == 'spreads':
-                        outcomes = market['outcomes']
-                        for outcome in outcomes:
-                            team = outcome['name']
-                            spread = outcome['point']
+            line = consensus_line(lines)
+            if home_team in spreads or away_team in spreads:
+                print(f"  ⚠️  {away_team} @ {home_team}: a team appears twice on {game_date}; keeping the first line")
+                continue
+            spreads[home_team] = line          # negative means home favorite
+            spreads[away_team] = -line + 0.0
+            spread_detail = ', '.join(f"{v:+g} ×{c}" for v, c in Counter(lines).most_common())
+            print(f"  {away_team} @ {home_team}: {home_team} {line:+.1f} ({len(lines)} books: {spread_detail})")
 
-                            # Store spread (negative means favorite)
-                            spreads[team] = spread
-
-        print(f"✓ Fetched spreads for {len(spreads) // 2} games")
+        print(f"✓ Fetched spreads for {len(spreads) // 2} games on {game_date} "
+              f"({other_days} games on other days ignored)")
         print(f"  Odds API teams: {sorted(spreads.keys())}")
         return spreads
 
@@ -498,7 +532,7 @@ def main(date=None):
     print(f"\n🔓 GENERATING NEW PREDICTIONS: {len(unstarted_games)} games not yet started")
 
     # Get Vegas spreads
-    vegas_spreads = get_vegas_spreads()
+    vegas_spreads = get_vegas_spreads(date)   # date None = today (Eastern)
 
     # Get team statistics
     team_stats = get_team_stats_from_databricks()
