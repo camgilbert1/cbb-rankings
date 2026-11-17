@@ -189,8 +189,10 @@ def find_team_match(espn_name, team_stats):
     words = espn_name.split()
     school_name = ' '.join(words[:-1]) if len(words) > 1 else espn_name
 
-    # Reject known non-D1 schools before any fuzzy matching
-    if school_name in NON_D1_SCHOOLS or any(school_name.startswith(s) for s in NON_D1_SCHOOLS):
+    # Reject known non-D1 schools before any fuzzy matching (apostrophe-insensitive: names read
+    # back from Databricks have lost theirs)
+    bare = school_name.replace("'", "").replace("’", "")
+    if any(bare.startswith(s.replace("'", "")) for s in NON_D1_SCHOOLS):
         return None
 
     # Check explicit school name mapping first
