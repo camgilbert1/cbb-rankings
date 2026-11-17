@@ -23,6 +23,10 @@ NON_D1_SCHOOLS = {
     "Saint Mary's (MN)",         # → incorrectly matches 'Saint Marys' (the D1 Gaels)
     "St. Joseph's Brooklyn",     # → incorrectly matches 'Michigan St.' via first-word
     "St. Joseph's Long Island",  # → incorrectly matches 'Michigan St.' via first-word
+    'Maine Augusta',             # → incorrectly matches 'Maine'
+    'Vermont State Lyndon',      # → incorrectly matches 'Vermont'
+    'Fort Lauderdale',           # → incorrectly matches 'Purdue Fort Wayne'
+    'Pacific Union',             # → incorrectly matches 'Pacific'
     "St. Mary's (MD)",           # → incorrectly matches 'Cal St. Fullerton'
     'UT Dallas',                 # → incorrectly matches 'UT Arlington'
 }

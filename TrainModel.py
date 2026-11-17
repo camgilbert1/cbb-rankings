@@ -229,6 +229,9 @@ def add_schedule_features(df):
     for predicting upcoming games.
     """
     df = df.sort_values(['game_date', 'home_team', 'away_team']).reset_index(drop=True)
+    # Keys are name_key(team) so lookups work whether a name carries its apostrophe or not
+    df['home_team'] = df['home_team'].map(name_key)
+    df['away_team'] = df['away_team'].map(name_key)
     ratings, last_played, played = {}, {}, {}
     season_of = {}
     cols = {k: np.empty(len(df)) for k in
@@ -526,12 +529,15 @@ def upcoming_feature_rows(games, ratings_df, state):
         for side, team, r in (('home', game['home_team'], h), ('away', game['away_team'], a)):
             row.update({f'{side}_adj_o': r['adj_o'], f'{side}_adj_d': r['adj_d'],
                         f'{side}_adj_em': r['adj_em'], f'{side}_tempo': r['tempo']})
-            in_season = state['season_of'].get(team) == CURRENT_SEASON
-            rating = state['ratings'].get(team, 0.0)
+            # Schedule state is keyed by names as stored in Databricks (apostrophes dropped), while
+            # today's games come from ESPN with apostrophes — look up by the shared key.
+            key = name_key(team)
+            in_season = state['season_of'].get(key) == CURRENT_SEASON
+            rating = state['ratings'].get(key, 0.0)
             row[f'{side}_rating'] = rating if in_season else rating * RATING_CARRYOVER
-            prev = state['last_played'].get(team) if in_season else None
+            prev = state['last_played'].get(key) if in_season else None
             row[f'{side}_rest'] = min((today - prev).days, REST_CAP) if prev is not None else REST_CAP
-            row[f'{side}_gp'] = state['played'].get(team, 0) if in_season else 0
+            row[f'{side}_gp'] = state['played'].get(key, 0) if in_season else 0
         row['actual_home_score'] = row['actual_away_score'] = np.nan
         rows.append(row)
     if not rows:
