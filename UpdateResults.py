@@ -231,6 +231,7 @@ def update_prediction_outcomes():
                      THEN 1 ELSE 0 END AS su_correct,
                 CASE
                     WHEN p.vegas_spread IS NULL THEN NULL  -- no line; 0 = pick 'em is graded
+                    WHEN (r.home_score - r.away_score + p.vegas_spread) = 0 THEN NULL  -- push (bet refunded)
                     WHEN (p.predicted_home_score - p.predicted_away_score + p.vegas_spread) > 0
                          AND (r.home_score - r.away_score + p.vegas_spread) > 0 THEN 1
                     WHEN (p.predicted_home_score - p.predicted_away_score + p.vegas_spread) <= 0
