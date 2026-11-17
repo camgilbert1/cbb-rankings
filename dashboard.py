@@ -431,6 +431,7 @@ def load_ml_predictions():
                    vegas_spread, ats_confidence
             FROM workspace.default.ml_predictions
             WHERE game_date = '{today}'
+              AND COALESCE(model_family, 'v2') = 'v2'   -- v3 rows sit alongside; table shows v2
         """)
         df_ml = cursor.fetchall_arrow().to_pandas()
         cursor.close()
@@ -1157,6 +1158,15 @@ if df is not None:
                     st.metric(f"{emoji} {conf} Confidence", "0-0", delta="no results yet")
         st.caption(f"Break-even at -110 is {ATS_BREAKEVEN}%. High = 8+ pt edge vs the spread, "
                    "Medium = 4–8, Low = under 4. Small samples swing a lot — judge after a few hundred picks.")
+        v3 = ml_perf.get('v3', {})
+        v3_tot = sum(p['total'] for p in v3.values())
+        if v3_tot:
+            v3_wins = sum(p['wins'] for p in v3.values())
+            st.caption(f"New model v3 (box-score ratings + KenPom blend, running alongside): "
+                       f"{v3_wins}-{v3_tot - v3_wins} ({v3_wins / v3_tot * 100:.1f}%)  · " +
+                       " · ".join(f"{c} {v3[c]['wins']}-{v3[c]['losses']}" for c in ('High', 'Medium', 'Low') if c in v3))
+        else:
+            st.caption("New model v3 (box-score ratings + KenPom blend, running alongside): no graded picks yet")
         prev = ml_perf.get('v1', {})
         if prev:
             parts = [f"{c} {prev[c]['wins']}-{prev[c]['losses']}" for c in ('High', 'Medium', 'Low') if c in prev]

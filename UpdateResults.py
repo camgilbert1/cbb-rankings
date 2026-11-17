@@ -277,7 +277,7 @@ def update_ml_ats_results():
         cursor.execute("""
             SELECT m.game_date, m.home_team, m.away_team,
                    m.ml_predicted_margin, m.vegas_spread,
-                   r.home_score, r.away_score
+                   r.home_score, r.away_score, COALESCE(m.model_family, 'v1') AS family
             FROM workspace.default.ml_predictions m
             JOIN workspace.default.game_results r
                 ON m.home_team = r.home_team
@@ -290,7 +290,7 @@ def update_ml_ats_results():
 
         updated = 0
         for row in rows:
-            game_date, home, away, pred_margin, spread, actual_home, actual_away = row
+            game_date, home, away, pred_margin, spread, actual_home, actual_away, family = row
             actual_margin = actual_home - actual_away
 
             if spread is not None:  # 0 = pick 'em (graded); NULL = no line
@@ -315,12 +315,13 @@ def update_ml_ats_results():
                 WHERE home_team = '{home_esc}'
                   AND away_team = '{away_esc}'
                   AND game_date = '{game_date}'
+                  AND COALESCE(model_family, 'v1') = '{family}'
             """)
             updated += 1
 
         cursor.close()
         connection.close()
-        print(f"  Updated ML ATS results for {updated} games")
+        print(f"  Updated ML ATS results for {updated} prediction rows (each model graded separately)")
 
     except Exception as e:
         print(f"  Error updating ML ATS results: {e}")

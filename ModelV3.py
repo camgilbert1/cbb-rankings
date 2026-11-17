@@ -1,0 +1,83 @@
+"""
+v3 model: point-in-time box-score ratings (BoxRatings.py) blended with the v2 KenPom model.
+
+  v3 margin = w(gp) * box_model + (1 - w(gp)) * v2_model
+    gp = games played by the less-experienced team.
+    w starts at BOX_SHARE_DEFAULT. Once DYN_MIN_GAMES current-season games have day-of KenPom
+    ratings, w(gp) = a + b*gp is fit on those games from HONEST component predictions
+    (both models trained on earlier seasons only), clipped to [0, 1].
+  v3 total = KenPom tempo formula (same as v2; box totals lost to it in Nov 2026 evaluation).
+
+Evaluation: EvaluateBoxModel.py. Nov 2026, 195 leak-free 2027 games: v2 12.96 RMSE,
+box model 13.26, 25/75 blend 12.92, Vegas 12.40.
+"""
+
+import numpy as np
+import pandas as pd
+from xgboost import XGBRegressor
+
+import BoxRatings as B
+
+SEASONS = [2023, 2024, 2025, 2026, 2027]   # 2023 = warm-up only (player values / priors for 2024)
+MODEL_FAMILY = 'v3'
+BOX_SHARE_DEFAULT = 0.25
+DYN_MIN_GAMES = 400
+
+FOUR_FACTOR_FEATURES = [f'exp_{s}_{m}' for s in 'ha' for m in B.FOUR_FACTORS]
+BOX_FEATURES = ['box_margin_est', 'box_em_diff', 'exp_h_eff', 'exp_a_eff', 'exp_poss_rel',
+                'prior_em_diff', 'home_court', 'home_rest', 'away_rest', 'box_min_gp']
+
+
+def merge_frames(v2, box, name_key, verbose=True):
+    """Attach box ratings to the v2 training frame by date + team names (fallback: date + final score)."""
+    k = lambda df, h, a: list(zip(df['game_date'], df[h].map(name_key), df[a].map(name_key)))
+    v2 = v2.copy(); box = box.copy()
+    v2['k'] = k(v2, 'home_team', 'away_team')
+    box['k'] = k(box, 'home_team', 'away_team')
+    box_cols = [c for c in box.columns if c not in v2.columns or c == 'k']
+    val_cols = [c for c in box_cols if c != 'k']
+    m = v2.merge(box[box_cols].drop_duplicates('k'), on='k', how='left')
+    miss = m['box_margin_est'].isna()
+    if miss.any():
+        v2s = v2.loc[miss.values].copy()
+        v2s['k2'] = list(zip(v2s.game_date, v2s.actual_home_score.astype(int), v2s.actual_away_score.astype(int)))
+        box['k2'] = list(zip(box.game_date, box.home_score.astype(int), box.away_score.astype(int)))
+        uniq = box[~box.duplicated('k2', keep=False)]
+        fill = v2s.merge(uniq[val_cols + ['k2']], on='k2', how='left')
+        m.loc[miss.values, val_cols] = fill[val_cols].values
+    still = m['box_margin_est'].isna()
+    if verbose:
+        print(f"  box ratings joined to {(~still).sum()} of {len(m)} training games "
+              f"({miss.sum() - still.sum()} by score fallback)")
+    m = m[~still].copy()
+    for c in val_cols:
+        if m[c].dtype == object:
+            m[c] = pd.to_numeric(m[c], errors='coerce')
+    return m
+
+
+def fit_box_model(df, weights, xgb_params):
+    m = XGBRegressor(**xgb_params)
+    m.fit(df[BOX_FEATURES], df['margin'], sample_weight=weights)
+    return m
+
+
+def fit_trust(df, current_season, v2_features, xgb_params, season_weights):
+    """
+    Box share as a function of games played. Returns (fn(gp array) -> share array, description).
+    Component predictions are honest: both models trained on seasons before current_season.
+    """
+    pit = df[(df['season'] == current_season) & df['ratings_point_in_time'].astype(bool)]
+    if len(pit) < DYN_MIN_GAMES:
+        return (lambda gp: np.full(len(gp), BOX_SHARE_DEFAULT),
+                f"fixed {BOX_SHARE_DEFAULT:.2f} box share ({len(pit)}/{DYN_MIN_GAMES} day-of-KenPom games for dynamic weights)")
+    past = df[df['season'] < current_season]
+    w = past['season'].map(season_weights).fillna(0.1)
+    box = XGBRegressor(**xgb_params).fit(past[BOX_FEATURES], past['margin'], sample_weight=w).predict(pit[BOX_FEATURES])
+    kp = XGBRegressor(**xgb_params).fit(past[v2_features], past['margin'], sample_weight=w).predict(pit[v2_features])
+    diff, gp = box - kp, pit['box_min_gp'].values
+    X = np.column_stack([diff, diff * gp])
+    a, b = np.linalg.lstsq(X, pit['margin'].values - kp, rcond=None)[0]
+    fn = lambda g: np.clip(a + b * np.asarray(g, dtype=float), 0.0, 1.0)
+    return fn, (f"dynamic box share on {len(pit)} games: {fn([0])[0]:.2f} at 0 games, "
+                f"{fn([5])[0]:.2f} at 5, {fn([15])[0]:.2f} at 15")

@@ -18,6 +18,11 @@ NON_D1_SCHOOLS = {
     'Northern New Mexico',       # → incorrectly matches 'Northern Kentucky'
     'Penn State Lehigh Valley',  # branch campus → incorrectly matches 'Penn St.'
     'Penn State Schuylkill',     # branch campus → incorrectly matches 'Penn St.'
+    "Paul Smith's",              # → incorrectly matches 'DePaul' via substring
+    "Saint John's (MN)",         # → incorrectly matches 'Saint Louis' via first-word
+    "Saint Mary's (MN)",         # → incorrectly matches 'Saint Marys' (the D1 Gaels)
+    "St. Joseph's Brooklyn",     # → incorrectly matches 'Michigan St.' via first-word
+    "St. Joseph's Long Island",  # → incorrectly matches 'Michigan St.' via first-word
     "St. Mary's (MD)",           # → incorrectly matches 'Cal St. Fullerton'
     'UT Dallas',                 # → incorrectly matches 'UT Arlington'
 }
@@ -207,6 +212,16 @@ def find_team_match(espn_name, team_stats):
         contains = team_stats[team_stats['team_name'].str.contains(mapped, case=False, na=False)]
         if len(contains) == 1:
             return contains.iloc[0]['team_name']
+
+    # Apostrophe-insensitive exact match. Team names stored in Databricks lose their apostrophes
+    # ("Saint Peters"), so "Saint Peter's" would otherwise fall through to the first-word search
+    # below and match a different "Saint" team.
+    norm = lambda s: s.replace("'", "").replace("’", "").lower()
+    by_norm = {norm(n): n for n in team_stats['team_name'].values}
+    for candidate in ([mapped] if mapped else []) + [school_name]:
+        for v in (candidate, candidate + '.'):
+            if norm(v) in by_norm:
+                return by_norm[norm(v)]
 
     # Try exact match on full ESPN name
     if espn_name in team_stats['team_name'].values:

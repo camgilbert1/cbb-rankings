@@ -1,7 +1,7 @@
 name: Daily Data Update
 
 # Runs every day at 11:30 AM ET (4:30 PM UTC)
-# APIPull only rebuilds the gold table if it's been 3+ days since last rebuild
+# APIPull rebuilds the gold table on every run (falls back to existing tables if KenPom blocks the runner)
 on:
   schedule:
     - cron: '30 16 * * *'
@@ -13,17 +13,26 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install kenpompy requests databricks-sql-connector pandas pyarrow python-dotenv pytz beautifulsoup4 cloudscraper xgboost scikit-learn numpy
+          pip install kenpompy requests databricks-sql-connector pandas pyarrow python-dotenv pytz beautifulsoup4 cloudscraper xgboost scikit-learn scipy numpy
+
+      # Box-score Parquet files for the v3 model (BoxRatings.py). Past seasons never change, so they are
+      # cached between runs; the current season is re-downloaded when the cached copy is > 6 hours old.
+      - name: Restore box-score cache
+        uses: actions/cache@v4
+        with:
+          path: box_cache
+          key: box-cache-${{ github.run_id }}
+          restore-keys: box-cache-
 
       - name: Refresh KenPom data and rebuild gold table
         timeout-minutes: 20
@@ -52,8 +61,9 @@ jobs:
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
         run: python UpdateResults.py
 
-      - name: Retrain ML model and generate predictions
-        timeout-minutes: 30
+      # v2 (KenPom XGBoost) + v3 (box-score ratings blended with v2). v3 failures only warn.
+      - name: Retrain ML models and generate predictions
+        timeout-minutes: 40
         env:
           DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
           DATABRICKS_HTTP_PATH: ${{ secrets.DATABRICKS_HTTP_PATH }}
@@ -63,7 +73,7 @@ jobs:
       - name: Summary
         run: |
           echo "✅ Pipeline complete"
-          echo "📊 KenPom data refreshed (gold table rebuilds every 3 days)"
+          echo "📊 KenPom data refreshed"
           echo "🎯 Game predictions generated"
           echo "📈 Game results updated"
-          echo "🤖 ML model retrained"
+          echo "🤖 ML models retrained (v2 KenPom + v3 box-score blend)"

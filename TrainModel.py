@@ -494,14 +494,15 @@ def fetch_todays_games():
             if event['status']['type']['state'] == 'post':
                 continue
             competition = event['competitions'][0]
-            home = away = None
+            home = away = home_id = away_id = None
             for c in competition['competitors']:
                 if c['homeAway'] == 'home':
-                    home = c['team']['displayName']
+                    home, home_id = c['team']['displayName'], int(c['team']['id'])
                 else:
-                    away = c['team']['displayName']
+                    away, away_id = c['team']['displayName'], int(c['team']['id'])
             if home and away:
                 games.append({'home_team': home, 'away_team': away, 'game_date': today_date,
+                              'home_id': home_id, 'away_id': away_id,   # ESPN ids (= box-score team_id)
                               'neutral_site': bool(competition.get('neutralSite', False))})
         print(f"  {len(games)} upcoming games")
         return games
@@ -553,11 +554,15 @@ def generate_predictions(models, games, ratings_df, state, spreads=None):
     pred_margins = margin['model'].predict(X[margin['features']])
     pred_totals = (total['model'].predict(X[total['features']]) if PUBLISH_ML_TOTAL
                    else X['kp_total_est'].values)
+    return build_records(X, pred_margins, pred_totals, spreads, margin.get('version', 'unknown'))
 
+
+def build_records(X, pred_margins, pred_totals, spreads, version, extras=None):
+    """Prediction rows for upload. extras: optional list of dicts merged into each record."""
     spreads = spreads or {}
-    version = margin.get('version', 'unknown')
+    extras = extras or [{}] * len(X)
     records = []
-    for (_, game), pred_margin, pred_total in zip(X.iterrows(), pred_margins, pred_totals):
+    for (_, game), pred_margin, pred_total, extra in zip(X.iterrows(), pred_margins, pred_totals, extras):
         pred_margin, pred_total = float(pred_margin), float(pred_total)
         pred_home = (pred_total + pred_margin) / 2
         pred_away = (pred_total - pred_margin) / 2
@@ -586,16 +591,67 @@ def generate_predictions(models, games, ratings_df, state, spreads=None):
             'model_version':           version,
             'vegas_spread':            spread,
             'ats_confidence':          ats_conf,
+            **extra,
         })
     return records
 
 
-def upload_predictions(records):
+def run_v3(models, df_v2, games_today, ratings_df, state, spreads):
+    """
+    v3 = box-score ratings model blended with the v2 KenPom model (see ModelV3.py).
+    Any failure (e.g. box-score data unavailable) skips v3 with an Actions warning; v2 is unaffected.
+    """
+    import BoxRatings as B
+    import ModelV3 as V3
+    print("\n" + "=" * 70)
+    print("v3 — BOX-SCORE RATINGS + KENPOM BLEND")
+    print("=" * 70)
+    try:
+        print("Building point-in-time box-score ratings...")
+        box, bstate = B.build_asof(V3.SEASONS, current_season=CURRENT_SEASON)
+        latest = box['game_date'].max().date()
+        stale_days = (datetime.now(EASTERN).date() - latest).days
+        if stale_days > 2:
+            print(f"::warning::v3 skipped — newest box score is {latest} ({stale_days} days old); v2 unaffected")
+            return []
+        box = B.add_box_features(box)
+        df = V3.merge_frames(df_v2, box, name_key)
+        df = df[df['season'] >= 2024].reset_index(drop=True)
+        weights, weights_used = compute_weights(df)
+        box_model = V3.fit_box_model(df, weights, XGBOOST_PARAMS)
+        trust, desc = V3.fit_trust(df, CURRENT_SEASON, MARGIN_FEATURES, XGBOOST_PARAMS, weights_used)
+        print(f"  Box model trained on {len(df)} games (box scores through {latest})")
+        print(f"  Trust weights: {desc}")
+
+        margin = models.get('margin_model')
+        X = upcoming_feature_rows(games_today, ratings_df, state)
+        if margin is None or X.empty:
+            return []
+        Xb = B.upcoming_rows(X.to_dict('records'), bstate)
+        if Xb.empty:
+            return []
+        skipped = len(X) - len(Xb)
+        if skipped:
+            print(f"  {skipped} game(s) skipped — team not in box-score ratings yet")
+        kp = margin['model'].predict(Xb[margin['features']])
+        bx = box_model.predict(Xb[V3.BOX_FEATURES])
+        share = trust(Xb['box_min_gp'].values)
+        blended = share * bx + (1 - share) * kp
+        extras = [{'box_margin': round(float(b), 1), 'kp_margin': round(float(k), 1), 'box_share': round(float(s), 3)}
+                  for b, k, s in zip(bx, kp, share)]
+        return build_records(Xb, blended, Xb['kp_total_est'].values, spreads,
+                             f"v3_{datetime.now().strftime('%Y%m%d')}", extras)
+    except Exception as e:
+        print(f"::warning::v3 skipped ({type(e).__name__}: {e}); v2 predictions unaffected")
+        return []
+
+
+def upload_predictions(records, family=MODEL_FAMILY):
     if not records:
-        print("  No ML predictions to upload")
+        print(f"  No {family} predictions to upload")
         return
     game_date = records[0]['game_date']
-    print(f"Uploading {len(records)} ML predictions for {game_date}...")
+    print(f"Uploading {len(records)} {family} predictions for {game_date}...")
     try:
         conn = db_connect()
         cursor = conn.cursor()
@@ -613,13 +669,18 @@ def upload_predictions(records):
             "vegas_spread DOUBLE", "ats_confidence STRING",
             "actual_home_score INT", "actual_away_score INT", "ml_ats_correct INT",
             "model_family STRING",
+            # v3 components: box-score model margin, KenPom (v2) model margin, weight on the box model
+            "box_margin DOUBLE", "kp_margin DOUBLE", "box_share DOUBLE",
         ]:
             try:
                 cursor.execute(f"ALTER TABLE workspace.default.ml_predictions ADD COLUMNS ({col_def})")
             except Exception:
                 pass
 
-        cursor.execute(f"DELETE FROM workspace.default.ml_predictions WHERE game_date = '{game_date}'")
+        # Replace only this model's rows for the date (v2 and v3 are stored side by side)
+        cursor.execute(f"""DELETE FROM workspace.default.ml_predictions
+                           WHERE game_date = '{game_date}' AND COALESCE(model_family, 'v1') = '{family}'""")
+        num = lambda v: 'NULL' if v is None else v
         for rec in records:
             he = rec['home_team'].replace("'", "''")
             ae = rec['away_team'].replace("'", "''")
@@ -630,15 +691,17 @@ def upload_predictions(records):
                      ml_predicted_margin, ml_predicted_total,
                      ml_win_probability, model_version, generated_at,
                      vegas_spread, ats_confidence,
-                     actual_home_score, actual_away_score, ml_ats_correct, model_family)
+                     actual_home_score, actual_away_score, ml_ats_correct, model_family,
+                     box_margin, kp_margin, box_share)
                 VALUES (
                     '{rec['game_date']}', '{he}', '{ae}',
                     {rec['ml_predicted_home_score']}, {rec['ml_predicted_away_score']},
                     {rec['ml_predicted_margin']}, {rec['ml_predicted_total']},
                     {rec['ml_win_probability']}, '{rec['model_version']}',
                     current_timestamp(),
-                    {'NULL' if rec['vegas_spread'] is None else rec['vegas_spread']}, '{rec['ats_confidence']}',
-                    NULL, NULL, NULL, '{MODEL_FAMILY}'
+                    {num(rec['vegas_spread'])}, '{rec['ats_confidence']}',
+                    NULL, NULL, NULL, '{family}',
+                    {num(rec.get('box_margin'))}, {num(rec.get('kp_margin'))}, {num(rec.get('box_share'))}
                 )
             """)
         cursor.close()
@@ -704,6 +767,16 @@ def main():
     print(f"  Loaded spreads for {len(spreads)} games from prediction_history")
     prediction_records = generate_predictions(models, games_today, ratings_df, state, spreads=spreads)
     upload_predictions(prediction_records)
+
+    # 6b. v3 (box-score ratings + KenPom blend), published alongside v2
+    v3_records = run_v3(models, df, games_today, ratings_df, state, spreads)
+    import ModelV3
+    upload_predictions(v3_records, family=ModelV3.MODEL_FAMILY)
+    if v3_records:
+        print(f"\n  v3 picks ({len(v3_records)} games):")
+        for rec in v3_records:
+            print(f"    {rec['away_team']} @ {rec['home_team']}:  v3 {rec['ml_predicted_margin']:+.1f}  "
+                  f"(box {rec['box_margin']:+.1f}, KenPom {rec['kp_margin']:+.1f}, box share {rec['box_share']:.2f})")
 
     # 7. Summary
     print("\n" + "=" * 70)
