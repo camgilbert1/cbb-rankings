@@ -233,13 +233,20 @@ function renderPicks() {
   // Today's plays (#26): every official pick for the selected day, collapsible; tap one to jump to its game
   const plays = [...picks].sort((a, b) => (a.time || '').localeCompare(b.time || ''))
     .flatMap(g => ['ats', 'ou'].map(mk => ({ g, mk, b: betOf(g, OFFICIAL, mk) })).filter(x => x.b));
-  const playsOpen = lsGet('cbb.playsOpen') !== '0';
+  const playsOpen = lsGet('cbb.playsOpen') === '1';          // collapsed until the viewer opens it
+  // Short pick text so the line always fits on a phone: "Penn State −17.5", "UNDER 169.5"
+  const shortPick = (g, mk, b) => {
+    if (mk === 'ou' || g.spread === null || g.spread === undefined) return b.label;
+    const home = b.side === 'home', line = home ? g.spread : -g.spread;
+    return `${shortName(home ? g.home : g.away)} ${line === 0 ? 'PK' : fmtLine(line)}`;
+  };
   const playsBar = plays.length ? `<details class="plays" id="plays" ${playsOpen ? 'open' : ''}>
       <summary><span class="plays-title">${ui.date === S.meta.today ? "Today's plays" : 'Plays'}</span>
         <span class="mut num">${plays.length} · ${nAts} ATS · ${nOu} O/U</span><span class="caret">▾</span></summary>
       <div class="play-list">${plays.map(({ g, mk, b }) => `<button class="play-row" data-card="${cardId(g)}">
-        <span class="pr-time num">${esc(etTime(g.time))}</span><span class="tag mk-${mk}">${MARKETS[mk].label}</span>
-        <span class="pr-pick">${esc(b.label)}</span><span class="pr-game mut">${esc(shortName(g.away))} ${g.neutral ? 'vs' : '@'} ${esc(shortName(g.home))}</span>
+        <span class="tag mk-${mk}">${MARKETS[mk].label}</span>
+        <span class="pr-main"><span class="pr-pick">${esc(shortPick(g, mk, b))}</span>
+          <span class="pr-sub">${esc(etTime(g.time).replace(' ET', ''))} · ${esc(shortName(g.away))} ${g.neutral ? 'vs' : '@'} ${esc(shortName(g.home))}</span></span>
         <span class="pr-prob num">${fmt(b.prob * 100, 0)}%</span></button>`).join('')}</div></details>` : '';
   $app.innerHTML = `
     <div class="page-head"><div><h1>${ui.date === S.meta.today ? "Tonight's Games" : 'Games'}</h1>
