@@ -183,7 +183,7 @@ def build_games(t, key2id, id2name, neutral, finals, slates):
             hid, aid = key2id.get(nk(home)), key2id.get(nk(away))
             games[k] = {'date': date, 'time': None, 'state': None, 'status': None,
                         'home': {'id': hid, 'name': id2name.get(hid, home)}, 'away': {'id': aid, 'name': id2name.get(aid, away)},
-                        'neutral': neutral.get((date, hid, aid), False), 'spread': None,
+                        'neutral': neutral.get((date, hid, aid), False), 'spread': None, 'total_line': None,
                         'formula': None, 'v2': None, 'v3': None, 'final': None}
         return games[k]
 
@@ -194,6 +194,7 @@ def build_games(t, key2id, id2name, neutral, finals, slates):
         g = get(r.game_date, r.home_team, r.away_team)
         g['time'] = r.game_time
         g['spread'] = clean(r.vegas_spread)
+        g['total_line'] = clean(getattr(r, 'vegas_total', None))   # over/under (saved from Nov 18, 2026 on)
         g['formula'] = {'home': clean(r.predicted_home_score), 'away': clean(r.predicted_away_score),
                         'margin': clean(r.predicted_home_score - r.predicted_away_score),
                         'win_prob': clean(r.win_probability), 'confidence': r.confidence,

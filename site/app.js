@@ -155,8 +155,13 @@ function gameCard(g) {
   } else {
     const fav = v3.margin >= 0 ? shortName(g.home) : shortName(g.away);
     const edge = g.spread === null || g.spread === undefined ? null : Math.abs(v3.margin + g.spread);
+    const predTotal = v3.home !== null && v3.home !== undefined ? v3.home + v3.away : null;
+    const ou = g.total_line === null || g.total_line === undefined ? null : g.total_line;
+    const actualTotal = done ? g.final.home + g.final.away : null;
     detail = `<div class="v3line"><span><b style="color:var(--violet)">v3</b> ${esc(fav)} by ${fmt(Math.abs(v3.margin))}</span>
-      <span class="mut num">${edge === null ? 'no line' : 'edge ' + fmt(edge)}${bet ? '' : ' · no bet'}</span></div>`;
+      <span class="mut num">${edge === null ? 'no line' : 'edge ' + fmt(edge)}${bet ? '' : ' · no bet'}</span></div>
+      <div class="v3line totals"><span>Total <b class="num" style="color:var(--violet)">${predTotal === null ? '—' : fmt(predTotal, 0)}</b> predicted</span>
+      <span class="mut num">${ou === null ? 'O/U line not posted' : 'O/U ' + fmt(ou, 1).replace(/\.0$/, '')}${actualTotal === null ? '' : ' · final ' + actualTotal}</span></div>`;
   }
   let banner = '';
   if (bet) {
