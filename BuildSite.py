@@ -22,6 +22,7 @@ import pytz
 import requests
 
 import BoxRatings as B
+import Betting
 import TrainModel as T
 from team_names import find_team_match
 
@@ -162,6 +163,16 @@ def build_teams(gold, key2id, id2name, counts, record, box):
     return teams
 
 
+def bet_of(r):
+    """A model's bet on one game from its stored bet columns, or None."""
+    flag = getattr(r, 'is_bet', None)
+    if flag is None or pd.isna(flag) or not bool(flag):
+        return None
+    retro = getattr(r, 'bet_retro', None)
+    return {'side': r.bet_side, 'label': r.bet_label, 'edge': clean(r.bet_edge), 'prob': clean(r.bet_prob),
+            'units': clean(r.bet_units), 'retro': bool(retro) if retro is not None and not pd.isna(retro) else False}
+
+
 def build_games(t, key2id, id2name, neutral, finals, slates):
     """One record per game, keyed by (date, home key, away key)."""
     games = {}
@@ -186,7 +197,8 @@ def build_games(t, key2id, id2name, neutral, finals, slates):
         g['formula'] = {'home': clean(r.predicted_home_score), 'away': clean(r.predicted_away_score),
                         'margin': clean(r.predicted_home_score - r.predicted_away_score),
                         'win_prob': clean(r.win_probability), 'confidence': r.confidence,
-                        'cover_pick': r.cover_pick, 'cover_confidence': r.cover_confidence, 'ats': None}
+                        'cover_pick': r.cover_pick, 'cover_confidence': r.cover_confidence, 'ats': None,
+                        'bet': bet_of(r)}
     for r in t['outcomes'].itertuples(index=False):
         g = get(r.game_date, r.home_team, r.away_team)
         if g['formula'] is not None:
@@ -199,7 +211,7 @@ def build_games(t, key2id, id2name, neutral, finals, slates):
                              'home': clean(r.ml_predicted_home_score), 'away': clean(r.ml_predicted_away_score),
                              'win_prob': clean(r.ml_win_probability), 'confidence': r.ats_confidence,
                              'ats': clean(r.ml_ats_correct), 'box': clean(r.box_margin), 'kp': clean(r.kp_margin),
-                             'box_share': clean(r.box_share)}
+                             'box_share': clean(r.box_share), 'bet': bet_of(r)}
         if g['spread'] is None:
             g['spread'] = clean(r.vegas_spread)
     for r in t['results'].itertuples(index=False):
@@ -250,9 +262,12 @@ def main():
     slates = espn_slate(today) + espn_slate(yesterday)
     games = build_games(t, key2id, id2name, neutral, finals, slates)
 
+    v3_dates = sorted(set(t['ml'].loc[t['ml']['model_family'] == 'v3', 'game_date']))
     meta = {'generated_at': now.isoformat(), 'today': today, 'season': T.CURRENT_SEASON,
             'box_through': box.get('through'), 'trust': box.get('trust'),
-            'breakeven': 52.4, 'n_games': len(games), 'n_teams': len(teams)}
+            'breakeven': 52.4, 'n_games': len(games), 'n_teams': len(teams),
+            'bet_threshold': Betting.BET_THRESHOLD, 'bet_units': Betting.BET_UNITS,
+            'v3_dates': v3_dates}
     for name, obj in (('meta', meta), ('teams', teams), ('games', games)):
         with open(os.path.join(OUT, f'{name}.json'), 'w') as fh:
             json.dump(obj, fh, separators=(',', ':'), default=clean)

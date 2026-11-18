@@ -16,6 +16,8 @@
   --blue: #3b9eff;
   --blue-bg: rgba(59, 158, 255, .12);
   --violet: #a78bfa;
+  --violet-bg: rgba(167, 139, 250, .10);
+  --violet-line: rgba(167, 139, 250, .55);
   --radius: 12px;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
@@ -155,6 +157,33 @@ tr.link { cursor: pointer; }
 .meter .mid { position: absolute; left: 50%; top: -3px; bottom: -3px; width: 1px; background: var(--line-2); }
 .back { color: var(--muted); font-weight: 600; display: inline-block; margin-top: 20px; }
 .back:hover { color: var(--text); }
+
+/* ---------- official picks / bets ---------- */
+.card.official { border-color: var(--violet-line); background: linear-gradient(180deg, var(--violet-bg), var(--panel) 62%); box-shadow: 0 0 0 1px var(--violet-bg) inset; }
+.card.official:hover { border-color: var(--violet); }
+.official-banner { margin: 10px 14px 2px; padding: 10px 12px; border-radius: 10px; background: var(--violet-bg); border: 1px solid var(--violet-line); }
+.ob-top { display: flex; align-items: center; gap: 6px; }
+.ob-label { font-size: 11px; font-weight: 800; letter-spacing: .08em; color: var(--violet); }
+.ob-pick { font-size: 17px; font-weight: 800; margin-top: 3px; letter-spacing: -.01em; }
+.ob-meta { color: var(--muted); font-size: 12px; margin-top: 1px; }
+.team-row.bet-side .tname { color: var(--violet); }
+.v3line { display: flex; justify-content: space-between; gap: 10px; padding: 9px 14px 11px; border-top: 1px solid var(--line); font-size: 13px; }
+.tag.retro { background: var(--amber-bg); color: var(--amber); margin-left: 0; }
+.tag.official-tag { background: var(--violet-bg); color: var(--violet); vertical-align: 2px; }
+.res.pend { background: var(--panel-2); color: var(--dim); }
+.stat.accent { border-color: var(--violet-line); background: linear-gradient(180deg, var(--violet-bg), var(--panel)); }
+.stat.accent .k { color: var(--violet); }
+.notice { background: var(--amber-bg); border: 1px solid rgba(245, 165, 36, .4); color: var(--amber); border-radius: 10px; padding: 10px 14px; margin-bottom: 16px; font-weight: 600; font-size: 13px; }
+.mcard.official-model { border-color: var(--violet-line); }
+.small { font-size: 12px; }
+.link-inline { color: var(--violet); font-weight: 600; }
+.link-inline:hover { text-decoration: underline; }
+.calib { position: relative; height: 6px; background: var(--panel-2); border-radius: 3px; margin-top: 5px; width: 150px; max-width: 100%; }
+.calib .won { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; }
+.calib .won.ok { background: var(--green); }
+.calib .won.bad { background: var(--red); }
+.calib .said { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: var(--text); z-index: 1; }
+.chip:focus-visible, .select:focus-visible, .search:focus-visible, a:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
 
 .footer { color: var(--dim); font-size: 12px; padding: 30px 16px 40px; border-top: 1px solid var(--line); margin-top: 30px; }
 

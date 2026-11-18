@@ -27,6 +27,7 @@ ODDS_API_KEY = os.getenv("ODDS_API_KEY")
 DAY_START_HOUR_ET = 4   # betting day boundary for Vegas lines (see get_vegas_spreads)
 
 from team_names import find_team_match, normalize_team_name_for_odds
+import Betting
 
 
 # =============================================================================
@@ -435,12 +436,23 @@ def predict_game(home_team, away_team, features, national_avg=106.0, win_prob_wi
     }
 
 
-def upload_predictions_to_databricks(predictions_df):
+PREDICTION_HISTORY_TABLE = 'workspace.default.prediction_history'
+
+# Insert order for prediction_history. Columns are named explicitly so adding columns to the table
+# (e.g. the bet columns) can never shift values into the wrong column.
+HISTORY_COLUMNS = ['game_date', 'game_time', 'home_team', 'away_team', 'predicted_winner', 'win_probability',
+                   'predicted_home_score', 'predicted_away_score', 'confidence', 'vegas_spread', 'cover_pick',
+                   'cover_confidence', 'prediction_date', 'home_adj_em', 'away_adj_em', 'home_oe', 'away_oe',
+                   'home_de', 'away_de', 'home_rank', 'away_rank'] + [c for c, _ in Betting.BET_COLUMNS]
+
+
+def upload_predictions_to_databricks(predictions_df, table=PREDICTION_HISTORY_TABLE):
     """
     Upload predictions to Databricks
 
     Args:
         predictions_df (pd.DataFrame): Predictions dataframe
+        table (str): target table (default prediction_history; tests pass a scratch copy)
     """
     print("\nUploading predictions to Databricks...")
 
@@ -506,6 +518,8 @@ def upload_predictions_to_databricks(predictions_df):
 
         # Delete ONLY predictions for games we're about to regenerate
         # This preserves predictions for games that have already started (lock mechanism)
+        Betting.ensure_bet_columns(cursor, table)
+
         print("  Removing old predictions for unstarted games...")
         deleted_count = 0
         for _, row in predictions_df.iterrows():
@@ -513,7 +527,7 @@ def upload_predictions_to_databricks(predictions_df):
             home_team_escaped = row['home_team'].replace("'", "''")
             away_team_escaped = row['away_team'].replace("'", "''")
             cursor.execute(f"""
-                DELETE FROM workspace.default.prediction_history
+                DELETE FROM {table}
                 WHERE home_team = '{home_team_escaped}'
                   AND away_team = '{away_team_escaped}'
                   AND game_date = '{row['game_date']}'
@@ -530,8 +544,9 @@ def upload_predictions_to_databricks(predictions_df):
             cover_pick_escaped = row['cover_pick'].replace("'", "''")
             spread_sql = 'NULL' if pd.isna(row['vegas_spread']) else row['vegas_spread']
 
+            bet_sql = ', '.join(Betting.sql_value(row[c]) for c, _ in Betting.BET_COLUMNS)
             cursor.execute(f"""
-                INSERT INTO workspace.default.prediction_history VALUES (
+                INSERT INTO {table} ({', '.join(HISTORY_COLUMNS)}) VALUES (
                     '{row['game_date']}',
                     '{row['game_time']}',
                     '{home_team_escaped}',
@@ -552,7 +567,8 @@ def upload_predictions_to_databricks(predictions_df):
                     {row['home_de']},
                     {row['away_de']},
                     {row['home_rank']},
-                    {row['away_rank']}
+                    {row['away_rank']},
+                    {bet_sql}
                 )
             """)
 
@@ -623,6 +639,18 @@ def main(date=None):
     win_prob_width, width_source = fit_win_prob_width(load_graded_formula_games(season_start), run_day)
     print(f"  Win-prob width: {win_prob_width:.1f} pts ({width_source})")
 
+    # Bet scatter (how far results land from the line), re-fit on graded games before the prediction date
+    try:
+        connection = sql.connect(server_hostname=DATABRICKS_HOST, http_path=DATABRICKS_HTTP_PATH,
+                                 access_token=DATABRICKS_TOKEN)
+        cursor = connection.cursor()
+        bet_params = Betting.fit_for_run(cursor, run_day)
+        cursor.close()
+        connection.close()
+    except Exception as e:
+        bet_params = Betting.SCATTER_DEFAULT
+        print(f"⚠️  Could not fit the bet scatter ({e}); using the default")
+
     # Generate predictions for each game
     print("\n" + "="*80)
     print("GENERATING PREDICTIONS")
@@ -690,6 +718,10 @@ def main(date=None):
             cover_pick = 'N/A'
             cover_confidence = 'N/A'
 
+        # Bet only on a real prediction (an unmatched team leaves 0-0 scores, which would look like a huge edge)
+        bet = (Betting.make_bet(home_team, away_team, predicted_margin, home_spread, bet_params)
+               if features is not None else None)
+
         # Display prediction
         print(f"Predicted Winner: {prediction['predicted_winner']} ({prediction['win_probability']:.0%} confidence)")
         print(f"Predicted Score: {home_team} {prediction['predicted_home_score']}, {away_team} {prediction['predicted_away_score']}")
@@ -701,6 +733,8 @@ def main(date=None):
                 spread_text = f"{home_team} {home_spread:+.1f}" if home_spread < 0 else f"{away_team} {-home_spread:+.1f}"
             print(f"Vegas Spread: {spread_text}")
             print(f"Cover Pick: {cover_pick} (Confidence: {cover_confidence})")
+        if bet:
+            print(f"BET: {bet['label']}  ({bet['prob']:.0%} to cover, edge {bet['edge']:.1f}, {Betting.BET_UNITS:g}u)")
         print(f"Confidence Level: {prediction['confidence']}")
         print(f"\nKey Factors:")
         for factor in prediction['key_factors']:
@@ -739,6 +773,7 @@ def main(date=None):
             'away_de': features['away_de'] if features else 0.0,
             'home_rank': features['home_rank'] if features else 0,
             'away_rank': features['away_rank'] if features else 0,
+            **Betting.bet_fields(bet),
         })
 
     # Convert to DataFrame
@@ -758,6 +793,7 @@ def main(date=None):
     print("PREDICTION SUMMARY")
     print("="*80)
     print(f"Total Games: {len(predictions_df)}")
+    print(f"Bets: {int(predictions_df['is_bet'].sum())} at {Betting.BET_THRESHOLD:.0%}+ cover probability")
     print(f"High Confidence: {len(predictions_df[predictions_df['confidence'] == 'High'])}")
     print(f"Medium Confidence: {len(predictions_df[predictions_df['confidence'] == 'Medium'])}")
     print(f"Low Confidence: {len(predictions_df[predictions_df['confidence'] == 'Low'])}")

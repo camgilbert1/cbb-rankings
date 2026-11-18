@@ -1,11 +1,15 @@
 /* CBB Model — static site. Data comes from data/*.json written nightly by BuildSite.py. */
 'use strict';
 
+// v3 is the official model (its bets are the "official picks"); Formula and v2 are benchmarks that
+// still make their own bets, analysed on the Models tab.
 const MODELS = [
-  { key: 'formula', label: 'Formula', color: '#3b9eff', note: 'KenPom efficiency × tempo' },
-  { key: 'v2', label: 'v2', color: '#22c55e', note: 'XGBoost: KenPom, rest, form' },
   { key: 'v3', label: 'v3', color: '#a78bfa', note: 'Box-score ratings + v2 blend' },
+  { key: 'v2', label: 'v2', color: '#22c55e', note: 'XGBoost: KenPom, rest, form' },
+  { key: 'formula', label: 'Formula', color: '#3b9eff', note: 'KenPom efficiency × tempo' },
 ];
+const OFFICIAL = 'v3';
+const WIN_PAYOUT = 100 / 110;   // a 1u bet at -110 wins 0.91u
 const S = { meta: null, teams: {}, games: [], ui: {} };
 const $app = document.getElementById('app');
 
@@ -53,31 +57,49 @@ function niceDate(ymd, opts = { weekday: 'short', month: 'short', day: 'numeric'
   return new Date(Date.UTC(y, m - 1, d, 12)).toLocaleDateString('en-US', { ...opts, timeZone: 'UTC' });
 }
 
-/* ATS pick for a model on a game: {home: bool, edge, label, conf} or null */
-function pick(g, key) {
-  const m = g[key];
-  if (!m || m.margin === null || g.spread === null || g.spread === undefined) return null;
-  const v = m.margin + g.spread;
-  if (v === 0) return null;
-  const home = v > 0;
-  const label = home ? `${shortName(g.home)} ${fmtLine(g.spread)}` : `${shortName(g.away)} ${fmtLine(-g.spread)}`;
-  const conf = key === 'formula' ? (m.cover_confidence && m.cover_confidence !== 'N/A' ? m.cover_confidence : null) : m.confidence;
-  return { home, edge: Math.abs(v), label, conf };
-}
-/* graded result for a model's ATS pick: 'W' | 'L' | 'P' | null */
-function result(g, key) {
-  const p = pick(g, key);
-  if (!p || !g.final) return null;
-  const stored = g[key] && g[key].ats;
+const hasModel = g => MODELS.some(m => g[m.key]);
+
+/* ---------------- bets ----------------
+   A model's bet is stored per game (BuildSite: g[model].bet = {side, label, edge, prob, units, retro}).
+   Records count ONLY bets. A bet's result is the stored ATS grade (it grades the model's side, which is
+   always the bet side); a push or a game graded only on the site falls back to the final score. */
+const betOf = (g, key) => (g[key] && g[key].bet) || null;
+function betResult(g, key) {
+  const b = betOf(g, key);
+  if (!b || !g.final) return null;
+  const stored = g[key].ats;
   if (stored === 1) return 'W';
   if (stored === 0) return 'L';
+  if (g.spread === null || g.spread === undefined) return null;
   const c = (g.final.home - g.final.away) + g.spread;
   if (c === 0) return 'P';
-  return (c > 0) === p.home ? 'W' : 'L';
+  return (c > 0) === (b.side === 'home') ? 'W' : 'L';
 }
-const suCorrect = (g, key) => g.final && g[key] && g[key].margin ? (Math.sign(g[key].margin) === Math.sign(g.final.home - g.final.away)) : null;
-const projScore = g => (g.v3 && g.v3.home !== null) ? g.v3 : (g.v2 && g.v2.home !== null) ? g.v2 : g.formula;
-const hasModel = g => MODELS.some(m => g[m.key]);
+const betUnits = (b, r) => r === 'W' ? (b.units || 1) * WIN_PAYOUT : r === 'L' ? -(b.units || 1) : 0;
+
+function betStats(key, games) {
+  const st = { bets: 0, w: 0, l: 0, p: 0, pending: 0, units: 0, risked: 0, probSum: 0, retro: 0, live: 0, daily: {} };
+  for (const g of games) {
+    const b = betOf(g, key);
+    if (!b) continue;
+    st.bets++; st.probSum += b.prob || 0; b.retro ? st.retro++ : st.live++;
+    const r = betResult(g, key);
+    if (!r) { st.pending++; continue; }
+    if (r === 'W') st.w++; else if (r === 'L') st.l++; else st.p++;
+    const u = betUnits(b, r);
+    st.units += u; st.risked += r === 'P' ? 0 : (b.units || 1);
+    st.daily[g.date] = (st.daily[g.date] || 0) + u;
+  }
+  st.n = st.w + st.l;
+  st.pct = st.n ? st.w / st.n * 100 : null;
+  st.avgProb = st.bets ? st.probSum / st.bets * 100 : null;
+  st.roi = st.risked ? st.units / st.risked * 100 : null;
+  return st;
+}
+const recStr = s => `${s.w}-${s.l}${s.p ? '-' + s.p : ''}`;
+const resChip = r => r ? `<span class="res ${r}">${r === 'P' ? 'PUSH' : r}</span>` : '<span class="res pend">PENDING</span>';
+const retroTag = b => b && b.retro ? '<span class="tag retro" title="Bet applied after the fact to the stored pre-game prediction and line">RETRO</span>' : '';
+const unitsStr = u => `${u > 0 ? '+' : ''}${u.toFixed(2)}u`;
 
 /* ---------------- data ---------------- */
 async function load() {
@@ -90,19 +112,21 @@ async function load() {
 }
 
 /* ---------------- router ---------------- */
-const routes = { picks: renderPicks, scorecard: renderScorecard, ratings: renderRatings, results: renderResults, team: renderTeam };
+const routes = { picks: renderPicks, results: renderResults, models: renderModels, scorecard: renderModels,
+                 ratings: renderRatings, team: renderTeam };
 function route() {
   const [, name = 'picks', arg] = (location.hash || '#/picks').split('/');
-  document.querySelectorAll('#tabs a').forEach(a => a.classList.toggle('active', a.dataset.route === (name === 'team' ? 'ratings' : name)));
+  const tab = name === 'team' ? 'ratings' : name === 'scorecard' ? 'models' : name;
+  document.querySelectorAll('#tabs a').forEach(a => a.classList.toggle('active', a.dataset.route === tab));
   (routes[name] || renderPicks)(arg);
   window.scrollTo(0, 0);
 }
 window.addEventListener('hashchange', route);
 
-/* ================= PICKS ================= */
+/* ================= PICKS (v3 only) ================= */
 function gameCard(g) {
   const live = g.state === 'in', done = !!g.final;
-  const ps = projScore(g);
+  const v3 = g[OFFICIAL], bet = betOf(g, OFFICIAL);
   const top = `<span>${done ? '<span class="final">FINAL</span>' : live ? `<span class="live">● ${esc(g.status || 'LIVE')}</span>` : esc(etTime(g.time))}
                ${g.neutral ? '<span class="tag">NEUTRAL</span>' : ''}</span>
                <span>${g.spread === null || g.spread === undefined ? 'No line' : 'Line ' + esc(shortName(g.spread <= 0 ? g.home : g.away)) + ' ' + fmtLine(-Math.abs(g.spread))}</span>`;
@@ -110,97 +134,108 @@ function gameCard(g) {
     const t = team(side.id);
     const rk = t ? `<span class="rk">${t.kenpom.rank}</span>` : '';
     const line = g.spread === null || g.spread === undefined ? '' : fmtLine(isHome ? g.spread : -g.spread);
+    const isBetSide = bet && (bet.side === 'home') === isHome;
     let sc;
     if (done) {
       const mine = isHome ? g.final.home : g.final.away, theirs = isHome ? g.final.away : g.final.home;
       sc = `<div class="score num ${mine > theirs ? 'win' : 'loss'}">${mine}</div>`;
     } else {
-      sc = `<div class="score proj num" title="Projected">${ps ? fmt(isHome ? ps.home : ps.away, 0) : ''}</div>`;
+      sc = `<div class="score proj num" title="v3 projected score">${v3 && v3.home !== null ? fmt(isHome ? v3.home : v3.away, 0) : ''}</div>`;
     }
     const href = t ? `href="#/team/${side.id}"` : '';
-    return `<div class="team-row">${logo(side)}
+    return `<div class="team-row${isBetSide ? ' bet-side' : ''}">${logo(side)}
       <div style="min-width:0"><a ${href} class="tname">${rk}${esc(shortName(side))}</a>
       <div class="tmeta">${esc(side.record || (t && t.record) || '')}${t ? ' · ' + esc(t.conf) : ''}</div></div>
       <div class="line num">${line}</div>${sc}</div>`;
   };
-  const models = MODELS.map(m => {
-    const mm = g[m.key];
-    if (!mm) return `<div class="model none"><div class="mname">${m.label}</div><div class="pick">—</div><div class="proj">no pick</div></div>`;
-    const p = pick(g, m.key), r = result(g, m.key);
-    const fav = mm.margin >= 0 ? shortName(g.home) : shortName(g.away);
-    return `<div class="model"><div class="mname"><span style="color:${m.color}">${m.label}</span>
-        ${r ? `<span class="res ${r}">${r === 'P' ? 'PUSH' : r}</span>` : p && p.conf ? `<span class="conf ${p.conf}">${p.conf.toUpperCase()}</span>` : ''}</div>
-      <div class="pick">${p ? esc(p.label) : '<span class="mut">no line</span>'}</div>
-      <div class="proj num">${esc(fav)} by ${fmt(Math.abs(mm.margin))}${p ? ` · edge ${fmt(p.edge)}` : ''}</div></div>`;
-  }).join('');
+  let detail;
+  if (!v3) {
+    detail = '<div class="v3line mut">No v3 prediction for this game</div>';
+  } else {
+    const fav = v3.margin >= 0 ? shortName(g.home) : shortName(g.away);
+    const edge = g.spread === null || g.spread === undefined ? null : Math.abs(v3.margin + g.spread);
+    detail = `<div class="v3line"><span><b style="color:var(--violet)">v3</b> ${esc(fav)} by ${fmt(Math.abs(v3.margin))}</span>
+      <span class="mut num">${edge === null ? 'no line' : 'edge ' + fmt(edge)}${bet ? '' : ' · no bet'}</span></div>`;
+  }
+  let banner = '';
+  if (bet) {
+    const r = done ? betResult(g, OFFICIAL) : null;
+    banner = `<div class="official-banner">
+      <div class="ob-top"><span class="ob-label">OFFICIAL PICK</span>${retroTag(bet)}<span class="spacer"></span>${done ? resChip(r) : ''}</div>
+      <div class="ob-pick">${esc(bet.label)}</div>
+      <div class="ob-meta num">${fmt(bet.prob * 100, 0)}% to cover · edge ${fmt(bet.edge)} · ${fmt(bet.units, 0)}U${done && r ? ' · ' + unitsStr(betUnits(bet, r)) : ''}</div></div>`;
+  }
   let blend = '';
-  if (g.v3 && g.v3.box !== null && g.v3.kp !== null) {
-    const share = Math.round((g.v3.box_share || 0) * 100);
-    blend = `<div class="blendbar">v3 blend · box-score model <b class="num">${sgn(g.v3.box)}</b> · KenPom model <b class="num">${sgn(g.v3.kp)}</b> · ${share}% box
+  if (v3 && v3.box !== null && v3.kp !== null && v3.box !== undefined) {
+    const share = Math.round((v3.box_share || 0) * 100);
+    blend = `<div class="blendbar">Box-score model <b class="num">${sgn(v3.box)}</b> · KenPom model <b class="num">${sgn(v3.kp)}</b> · ${share}% box
       <div class="bar"><span style="width:${share}%"></span></div></div>`;
   }
-  const picks = MODELS.map(m => pick(g, m.key)).filter(Boolean);
-  const dis = picks.length > 1 && new Set(picks.map(p => p.home)).size > 1;
-  return `<div class="card">${`<div class="card-top">${top}</div>`}<div class="teams">${row(g.away, false)}${row(g.home, true)}</div>
-    <div class="models">${models}</div>${blend}${dis ? '<div class="blendbar disagree">⚡ Models disagree on the cover</div>' : ''}</div>`;
+  return `<div class="card${bet ? ' official' : ''}"><div class="card-top">${top}</div>${banner}
+    <div class="teams">${row(g.away, false)}${row(g.home, true)}</div>${detail}${blend}</div>`;
 }
 
 function renderPicks() {
   const dates = [...new Set(S.games.map(g => g.date))].sort().reverse();
-  const ui = S.ui.picks = S.ui.picks || { date: dates.includes(S.meta.today) ? S.meta.today : dates[0], filter: 'all', sort: 'time' };
-  let gs = S.games.filter(g => g.date === ui.date);
-  const counts = {
-    all: gs.length, line: gs.filter(g => g.spread !== null && g.spread !== undefined).length,
-    high: gs.filter(g => ['v2', 'v3'].some(k => (pick(g, k) || {}).conf === 'High')).length,
-    dis: gs.filter(g => { const p = MODELS.map(m => pick(g, m.key)).filter(Boolean); return p.length > 1 && new Set(p.map(x => x.home)).size > 1; }).length,
-  };
-  if (ui.filter === 'line') gs = gs.filter(g => g.spread !== null && g.spread !== undefined);
-  if (ui.filter === 'high') gs = gs.filter(g => ['v2', 'v3'].some(k => (pick(g, k) || {}).conf === 'High'));
-  if (ui.filter === 'dis') gs = gs.filter(g => { const p = MODELS.map(m => pick(g, m.key)).filter(Boolean); return p.length > 1 && new Set(p.map(x => x.home)).size > 1; });
-  if (ui.sort === 'edge') gs = [...gs].sort((a, b) => ((pick(b, 'v3') || pick(b, 'v2') || {}).edge || -1) - ((pick(a, 'v3') || pick(a, 'v2') || {}).edge || -1));
+  const ui = S.ui.picks = S.ui.picks || { date: dates.includes(S.meta.today) ? S.meta.today : dates[0], filter: 'all' };
   const day = S.games.filter(g => g.date === ui.date);
-  const graded = MODELS.map(m => { const rs = day.map(g => result(g, m.key)).filter(r => r === 'W' || r === 'L'); return { m, w: rs.filter(r => r === 'W').length, l: rs.filter(r => r === 'L').length }; });
+  const picks = day.filter(g => betOf(g, OFFICIAL));
+  const v3Ran = (S.meta.v3_dates || []).includes(ui.date) || day.some(g => g[OFFICIAL]);
+  let gs = ui.filter === 'picks' ? picks : day;
+  gs = [...gs].sort((a, b) => (betOf(b, OFFICIAL) ? 1 : 0) - (betOf(a, OFFICIAL) ? 1 : 0) || (a.time || '').localeCompare(b.time || ''));
+  const today = betStats(OFFICIAL, day), season = betStats(OFFICIAL, S.games);
   $app.innerHTML = `
     <div class="page-head"><div><h1>${ui.date === S.meta.today ? "Tonight's Picks" : 'Picks'}</h1>
-      <div class="sub">${niceDate(ui.date, { weekday: 'long', month: 'long', day: 'numeric' })} · ${day.length} games</div></div>
+      <div class="sub">${niceDate(ui.date, { weekday: 'long', month: 'long', day: 'numeric' })} · ${day.length} games · official picks are v3 bets at ${fmt((S.meta.bet_threshold || .6) * 100, 0)}%+ to cover</div></div>
       <select class="select" id="date">${dates.map(d => `<option value="${d}" ${d === ui.date ? 'selected' : ''}>${niceDate(d)}</option>`).join('')}</select></div>
+    ${v3Ran ? '' : `<div class="notice">v3 picks unavailable for this day${S.meta.box_through ? ` (box-score data through ${esc(niceDate(S.meta.box_through))})` : ''}.</div>`}
     <div class="strip">
-      <div class="stat"><div class="k">Games</div><div class="v num">${counts.all}</div><div class="d">${counts.line} with a Vegas line</div></div>
-      <div class="stat"><div class="k">High-confidence</div><div class="v num">${counts.high}</div><div class="d">v2/v3 edge 8+ pts</div></div>
-      <div class="stat"><div class="k">Models disagree</div><div class="v num">${counts.dis}</div><div class="d">different ATS side</div></div>
-      ${graded.map(x => `<div class="stat"><div class="k" style="color:${x.m.color}">${x.m.label} today</div><div class="v num">${x.w}-${x.l}</div><div class="d">ATS graded</div></div>`).join('')}
+      <div class="stat accent"><div class="k">Official picks</div><div class="v num">${picks.length}</div><div class="d">of ${day.length} games</div></div>
+      <div class="stat"><div class="k">This day</div><div class="v num">${recStr(today)}</div><div class="d">${today.pending ? today.pending + ' pending' : today.n ? unitsStr(today.units) : 'no graded picks'}</div></div>
+      <div class="stat"><div class="k">Season record</div><div class="v num">${recStr(season)}</div><div class="d">${season.pct === null ? 'no graded picks yet' : fmt(season.pct) + '% · break-even ' + S.meta.breakeven + '%'}</div></div>
+      <div class="stat"><div class="k">Season units</div><div class="v num ${season.units >= 0 ? 'pos' : 'neg'}">${unitsStr(season.units)}</div><div class="d">${season.bets} bets · 1U each</div></div>
     </div>
     <div class="controls">
-      ${[['all', 'All'], ['line', 'With line'], ['high', 'High confidence'], ['dis', 'Models disagree']]
-        .map(([k, l]) => `<button class="chip ${ui.filter === k ? 'on' : ''}" data-f="${k}">${l} <span class="mut">${counts[k]}</span></button>`).join('')}
-      <span class="spacer"></span>
-      <select class="select" id="sort"><option value="time" ${ui.sort === 'time' ? 'selected' : ''}>Sort: tip-off</option>
-        <option value="edge" ${ui.sort === 'edge' ? 'selected' : ''}>Sort: biggest edge</option></select>
+      <button class="chip ${ui.filter === 'all' ? 'on' : ''}" data-f="all">All games <span class="mut">${day.length}</span></button>
+      <button class="chip ${ui.filter === 'picks' ? 'on' : ''}" data-f="picks">Official picks only <span class="mut">${picks.length}</span></button>
     </div>
-    ${gs.length ? `<div class="cards">${gs.map(gameCard).join('')}</div>` : '<div class="empty">No games match this filter.</div>'}`;
+    ${gs.length ? `<div class="cards">${gs.map(gameCard).join('')}</div>` : `<div class="empty">${ui.filter === 'picks' ? 'No official picks this day.' : 'No games this day.'}</div>`}`;
   document.getElementById('date').onchange = e => { ui.date = e.target.value; renderPicks(); };
-  document.getElementById('sort').onchange = e => { ui.sort = e.target.value; renderPicks(); };
   document.querySelectorAll('[data-f]').forEach(b => b.onclick = () => { ui.filter = b.dataset.f; renderPicks(); });
 }
 
-/* ================= SCORECARD ================= */
-function modelStats(key, games) {
-  const st = { w: 0, l: 0, p: 0, conf: {}, su: [0, 0], err: [], daily: {} };
-  for (const g of games) {
+/* ================= MODELS (analysis of every model's bets) ================= */
+/* Every-game ATS view (secondary): how each model's lean did on every game with a line */
+function pick(g, key) {
+  const m = g[key];
+  if (!m || m.margin === null || g.spread === null || g.spread === undefined) return null;
+  const v = m.margin + g.spread;
+  if (v === 0) return null;
+  const home = v > 0;
+  const label = home ? `${shortName(g.home)} ${fmtLine(g.spread)}` : `${shortName(g.away)} ${fmtLine(-g.spread)}`;
+  return { home, edge: Math.abs(v), label };
+}
+function result(g, key) {
+  const p = pick(g, key);
+  if (!p || !g.final) return null;
+  const stored = g[key] && g[key].ats;
+  if (stored === 1) return 'W';
+  if (stored === 0) return 'L';
+  const c = (g.final.home - g.final.away) + g.spread;
+  if (c === 0) return 'P';
+  return (c > 0) === p.home ? 'W' : 'L';
+}
+const suCorrect = (g, key) => g.final && g[key] && g[key].margin ? (Math.sign(g[key].margin) === Math.sign(g.final.home - g.final.away)) : null;
+function everyGameStats(key) {
+  const st = { w: 0, l: 0, su: [0, 0], err: [] };
+  for (const g of S.games) {
     if (!g[key] || !g.final) continue;
     const s = suCorrect(g, key);
     if (s !== null) { st.su[0] += s ? 1 : 0; st.su[1] += 1; }
     if (g[key].margin !== null) st.err.push(Math.abs(g[key].margin - (g.final.home - g.final.away)));
     const r = result(g, key);
-    if (!r) continue;
-    const c = (pick(g, key) || {}).conf || 'Low';
-    st.conf[c] = st.conf[c] || { w: 0, l: 0 };
-    if (r === 'W') { st.w++; st.conf[c].w++; } else if (r === 'L') { st.l++; st.conf[c].l++; } else st.p++;
-    st.daily[g.date] = (st.daily[g.date] || 0) + (r === 'W' ? 1 : r === 'L' ? -1.1 : 0);
+    if (r === 'W') st.w++; else if (r === 'L') st.l++;
   }
-  st.n = st.w + st.l;
-  st.pct = st.n ? st.w / st.n * 100 : null;
-  st.units = st.w - 1.1 * st.l;
   st.mae = st.err.length ? st.err.reduce((a, b) => a + b, 0) / st.err.length : null;
   return st;
 }
@@ -209,60 +244,151 @@ function unitsChart(stats) {
   const dates = [...new Set(Object.values(stats).flatMap(s => Object.keys(s.daily)))].sort();
   if (dates.length < 2) return '<div class="empty">The chart appears once there are two graded days.</div>';
   const series = MODELS.map(m => {
-    let c = 0; const pts = [];
-    for (const d of dates) { if (stats[m.key].daily[d] !== undefined) c += stats[m.key].daily[d]; pts.push(stats[m.key].n || Object.keys(stats[m.key].daily).length ? c : null); }
-    const first = dates.findIndex(d => stats[m.key].daily[d] !== undefined);
-    return { m, pts: pts.map((v, i) => i < first ? null : v) };
+    const daily = stats[m.key].daily, first = dates.findIndex(d => daily[d] !== undefined);
+    let c = 0;
+    return { m, pts: dates.map((d, i) => { if (daily[d] !== undefined) c += daily[d]; return first === -1 || i < first ? null : c; }) };
   });
   const all = series.flatMap(s => s.pts.filter(v => v !== null)).concat([0]);
-  const lo = Math.min(...all) - 1, hi = Math.max(...all) + 1;
-  const W = 1000, H = 260, P = { l: 44, r: 16, t: 14, b: 28 };
+  const lo = Math.floor(Math.min(...all) - 1), hi = Math.ceil(Math.max(...all) + 1);
+  const W = 1000, H = 260, P = { l: 48, r: 16, t: 14, b: 28 };
   const x = i => P.l + i / (dates.length - 1) * (W - P.l - P.r);
   const y = v => P.t + (hi - v) / (hi - lo) * (H - P.t - P.b);
-  const ticks = [lo, (lo + hi) / 2, hi].map(v => Math.round(v));
+  const ticks = [...new Set([lo, Math.round((lo + hi) / 2), hi])];
   const lines = series.map(s => {
-    const d = s.pts.map((v, i) => v === null ? null : `${x(i).toFixed(1)},${y(v).toFixed(1)}`).filter(Boolean).join(' ');
-    return d ? `<polyline fill="none" stroke="${s.m.color}" stroke-width="2.5" stroke-linejoin="round" points="${d}"/>` : '';
+    const pts = s.pts.map((v, i) => v === null ? null : [x(i), y(v)]).filter(Boolean);
+    if (!pts.length) return '';
+    const end = pts[pts.length - 1];
+    return `<polyline fill="none" stroke="${s.m.color}" stroke-width="2.5" stroke-linejoin="round" points="${pts.map(p => p.map(n => n.toFixed(1)).join(',')).join(' ')}"/>
+      <circle cx="${end[0].toFixed(1)}" cy="${end[1].toFixed(1)}" r="4" fill="${s.m.color}"/>`;
   }).join('');
-  const xl = [0, Math.floor((dates.length - 1) / 2), dates.length - 1].map(i =>
+  const xl = [...new Set([0, Math.floor((dates.length - 1) / 2), dates.length - 1])].map(i =>
     `<text x="${x(i)}" y="${H - 8}" fill="#5c6b7a" font-size="12" text-anchor="middle">${niceDate(dates[i], { month: 'short', day: 'numeric' })}</text>`).join('');
-  return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Cumulative units by model">
     ${ticks.map(v => `<line x1="${P.l}" x2="${W - P.r}" y1="${y(v)}" y2="${y(v)}" stroke="#1f2b38"/><text x="${P.l - 8}" y="${y(v) + 4}" fill="#5c6b7a" font-size="12" text-anchor="end">${v > 0 ? '+' : ''}${v}u</text>`).join('')}
     <line x1="${P.l}" x2="${W - P.r}" y1="${y(0)}" y2="${y(0)}" stroke="#2a3a4b" stroke-dasharray="4 4"/>
     ${lines}${xl}</svg>`;
 }
 
-function renderScorecard() {
+/* rows of [label, test(bet)] -> table of each model's record in each bucket */
+function bucketTable(title, sub, buckets, valueLabel) {
+  const cell = (key, test) => {
+    const gs = S.games.filter(g => { const b = betOf(g, key); return b && test(b); });
+    const s = betStats(key, gs);
+    if (!s.bets) return '<td class="mut">—</td>';
+    return `<td class="num">${recStr(s)}${s.n ? ` <span class="mut">${fmt(s.pct, 0)}%</span>` : ''}${s.pending ? ` <span class="mut">+${s.pending}</span>` : ''}
+      <div class="${s.units >= 0 ? 'pos' : 'neg'} small">${s.n ? unitsStr(s.units) : ''}</div></td>`;
+  };
+  return `<div class="panel"><h2>${title} <small>${sub}</small></h2><div class="table-wrap"><table>
+    <thead><tr><th>${valueLabel}</th>${MODELS.map(m => `<th style="color:${m.color}">${m.label}</th>`).join('')}</tr></thead>
+    <tbody>${buckets.map(([lab, test]) => `<tr><td>${lab}</td>${MODELS.map(m => cell(m.key, test)).join('')}</tr>`).join('')}</tbody></table></div></div>`;
+}
+
+function calibrationPanel() {
+  const buckets = [[60, 65], [65, 70], [70, 80], [80, 101]];
+  const rows = buckets.map(([lo, hi]) => {
+    const cells = MODELS.map(m => {
+      const gs = S.games.filter(g => { const b = betOf(g, m.key); return b && b.prob * 100 >= lo && b.prob * 100 < hi; });
+      const s = betStats(m.key, gs);
+      if (!s.n) return `<td class="mut">${s.bets ? s.bets + ' pending' : '—'}</td>`;
+      const stated = gs.filter(g => betResult(g, m.key) === 'W' || betResult(g, m.key) === 'L').reduce((a, g) => a + betOf(g, m.key).prob, 0) / s.n * 100;
+      const diff = s.pct - stated;
+      return `<td class="num">${fmt(s.pct, 0)}% <span class="mut">won · said ${fmt(stated, 0)}%</span>
+        <div class="calib"><span class="said" style="left:${Math.min(stated, 100)}%"></span><span class="won ${diff >= 0 ? 'ok' : 'bad'}" style="width:${Math.min(s.pct, 100)}%"></span></div>
+        <div class="mut small">${s.n} graded</div></td>`;
+    }).join('');
+    return `<tr><td>${lo}–${hi > 100 ? '100' : hi}%</td>${cells}</tr>`;
+  }).join('');
+  return `<div class="panel"><h2>Does 60% really win 60%? <small>stated cover probability vs actual win rate on each model's bets</small></h2>
+    <div class="table-wrap"><table><thead><tr><th>Stated</th>${MODELS.map(m => `<th style="color:${m.color}">${m.label}</th>`).join('')}</tr></thead>
+    <tbody>${rows}</tbody></table></div>
+    <div class="body mut small">A bar reaching the tick means the model's confidence held up. This is what decides when to switch to the Vegas rule (track-record-adjusted probability vs break-even), after about 150 graded bets per model.</div></div>`;
+}
+
+function disagreementsPanel() {
+  const games = S.games.filter(g => {
+    const sides = MODELS.map(m => betOf(g, m.key)).filter(Boolean).map(b => b.side);
+    return new Set(sides).size > 1;
+  }).sort((a, b) => b.date.localeCompare(a.date));
+  const body = games.length ? games.map(g => `<tr><td class="num">${niceDate(g.date, { month: 'short', day: 'numeric' })}</td>
+      <td><div class="teamcell">${logo(g.away, 'logo-sm')}${esc(shortName(g.away))} <span class="mut">${g.neutral ? 'vs' : '@'}</span> ${logo(g.home, 'logo-sm')}${esc(shortName(g.home))}</div></td>
+      ${MODELS.map(m => { const b = betOf(g, m.key); return `<td>${b ? `${esc(b.label)} ${g.final ? resChip(betResult(g, m.key)) : ''}` : '<span class="mut">no bet</span>'}</td>`; }).join('')}</tr>`).join('')
+    : `<tr><td colspan="${2 + MODELS.length}" class="mut">No games yet where models bet opposite sides.</td></tr>`;
+  return `<div class="panel"><h2>Model disagreements <small>games where two models bet opposite sides</small></h2>
+    <div class="table-wrap"><table><thead><tr><th>Date</th><th>Matchup</th>${MODELS.map(m => `<th style="color:${m.color}">${m.label}</th>`).join('')}</tr></thead>
+    <tbody>${body}</tbody></table></div></div>`;
+}
+
+function betLog() {
+  const ui = S.ui.log = S.ui.log || { model: 'all', res: 'all' };
+  let rows = [];
+  for (const g of S.games) for (const m of MODELS) {
+    const b = betOf(g, m.key);
+    if (b) rows.push({ g, m, b, r: betResult(g, m.key) });
+  }
+  const counts = { all: rows.length, ...Object.fromEntries(MODELS.map(m => [m.key, rows.filter(x => x.m.key === m.key).length])) };
+  if (ui.model !== 'all') rows = rows.filter(x => x.m.key === ui.model);
+  if (ui.res === 'W' || ui.res === 'L') rows = rows.filter(x => x.r === ui.res);
+  if (ui.res === 'pending') rows = rows.filter(x => !x.r);
+  rows.sort((a, b) => b.g.date.localeCompare(a.g.date) || (b.g.time || '').localeCompare(a.g.time || ''));
+  return `<div class="panel" id="betlog"><h2>Bet log <small>${rows.length} bets</small></h2>
+    <div class="body"><div class="controls" style="margin:0">
+      <button class="chip ${ui.model === 'all' ? 'on' : ''}" data-lm="all">All models <span class="mut">${counts.all}</span></button>
+      ${MODELS.map(m => `<button class="chip ${ui.model === m.key ? 'on' : ''}" data-lm="${m.key}">${m.label} <span class="mut">${counts[m.key]}</span></button>`).join('')}
+      <span class="spacer"></span>
+      ${[['all', 'Any result'], ['W', 'Wins'], ['L', 'Losses'], ['pending', 'Pending']].map(([k, l]) => `<button class="chip ${ui.res === k ? 'on' : ''}" data-lr="${k}">${l}</button>`).join('')}
+    </div></div>
+    <div class="table-wrap"><table><thead><tr><th>Date</th><th>Model</th><th>Matchup</th><th>Bet</th><th class="r">To cover</th><th class="r">Edge</th><th>Result</th><th class="r">Units</th></tr></thead>
+    <tbody>${rows.length ? rows.map(({ g, m, b, r }) => `<tr><td class="num">${niceDate(g.date, { month: 'short', day: 'numeric' })}</td>
+      <td><b style="color:${m.color}">${m.label}</b></td>
+      <td><div class="teamcell">${logo(g.away, 'logo-sm')}${esc(shortName(g.away))} <span class="mut">${g.neutral ? 'vs' : '@'}</span> ${logo(g.home, 'logo-sm')}${esc(shortName(g.home))}</div></td>
+      <td><b>${esc(b.label)}</b> ${retroTag(b)}</td><td class="r num">${fmt(b.prob * 100, 0)}%</td><td class="r num">${fmt(b.edge)}</td>
+      <td>${resChip(r)}${g.final ? ` <span class="mut num">${g.final.away}-${g.final.home}</span>` : ''}</td>
+      <td class="r num ${r === 'W' ? 'pos' : r === 'L' ? 'neg' : 'mut'}">${r ? unitsStr(betUnits(b, r)) : '—'}</td></tr>`).join('')
+      : '<tr><td colspan="8" class="mut">No bets match.</td></tr>'}</tbody></table></div></div>`;
+}
+
+function renderModels() {
   const be = S.meta.breakeven || 52.4;
-  const stats = Object.fromEntries(MODELS.map(m => [m.key, modelStats(m.key, S.games)]));
+  const stats = Object.fromEntries(MODELS.map(m => [m.key, betStats(m.key, S.games)]));
   const card = m => {
-    const s = stats[m.key];
-    const delta = s.pct === null ? null : s.pct - be;
-    return `<div class="mcard" style="--c:${m.color}"><div class="t"><span>${m.label}</span><small>${esc(m.note)}</small></div>
-      <div class="big num">${s.n ? `${s.w}-${s.l}${s.p ? '-' + s.p : ''}` : '0-0'}</div>
-      <div class="delta num ${delta === null ? 'mut' : delta >= 0 ? 'pos' : 'neg'}">${s.pct === null ? 'no graded picks yet' : `${fmt(s.pct)}% ATS · ${sgn(delta)} vs ${be}% break-even`}</div>
+    const s = stats[m.key], delta = s.pct === null ? null : s.pct - be;
+    return `<div class="mcard${m.key === OFFICIAL ? ' official-model' : ''}" style="--c:${m.color}">
+      <div class="t"><span>${m.label}${m.key === OFFICIAL ? ' <span class="tag official-tag">OFFICIAL</span>' : ''}</span><small>${esc(m.note)}</small></div>
+      <div class="big num">${s.bets ? recStr(s) : '0-0'}</div>
+      <div class="delta num ${delta === null ? 'mut' : delta >= 0 ? 'pos' : 'neg'}">${s.pct === null ? (s.bets ? 'no graded bets yet' : 'no bets yet') : `${fmt(s.pct)}% · ${sgn(delta)} vs ${be}% break-even`}</div>
       <div class="rows">
-        <div><span>Units (−110)</span><b class="num ${s.units >= 0 ? 'pos' : 'neg'}">${sgn(s.units)}u</b></div>
-        ${['High', 'Medium', 'Low'].map(c => s.conf[c] ? `<div><span>${c} confidence</span><b class="num">${s.conf[c].w}-${s.conf[c].l} (${fmt(s.conf[c].w / (s.conf[c].w + s.conf[c].l) * 100, 0)}%)</b></div>` : '').join('')}
-        <div><span>Straight-up winners</span><b class="num">${s.su[1] ? `${s.su[0]}/${s.su[1]} (${fmt(s.su[0] / s.su[1] * 100, 0)}%)` : '—'}</b></div>
-        <div><span>Avg margin miss</span><b class="num">${s.mae === null ? '—' : fmt(s.mae) + ' pts'}</b></div>
+        <div><span>Units (1U per bet, −110)</span><b class="num ${s.units >= 0 ? 'pos' : 'neg'}">${unitsStr(s.units)}</b></div>
+        <div><span>Return on risk</span><b class="num">${s.roi === null ? '—' : sgn(s.roi) + '%'}</b></div>
+        <div><span>Bets</span><b class="num">${s.bets}${s.pending ? ` <span class="mut">(${s.pending} pending)</span>` : ''}</b></div>
+        <div><span>Avg stated cover prob</span><b class="num">${s.avgProb === null ? '—' : fmt(s.avgProb, 0) + '%'}</b></div>
+        <div><span>Live / retroactive</span><b class="num">${s.live} / ${s.retro}</b></div>
       </div></div>`;
   };
-  // head-to-head on games every model picked
-  const common = S.games.filter(g => MODELS.every(m => result(g, m.key) === 'W' || result(g, m.key) === 'L'));
-  const h2h = MODELS.map(m => { const w = common.filter(g => result(g, m.key) === 'W').length; return { m, w, l: common.length - w }; });
+  const every = MODELS.map(m => ({ m, s: everyGameStats(m.key) }));
   $app.innerHTML = `
-    <div class="page-head"><div><h1>Model Scorecard</h1><div class="sub">Against the spread, ${S.meta.season - 1}-${String(S.meta.season).slice(2)} season · break-even at −110 is ${be}%</div></div></div>
+    <div class="page-head"><div><h1>Models</h1><div class="sub">Each model bets games it rates ${fmt((S.meta.bet_threshold || .6) * 100, 0)}%+ to cover · records count only those bets · ${S.meta.season - 1}-${String(S.meta.season).slice(2)} season</div></div></div>
     <div class="models-grid">${MODELS.map(card).join('')}</div>
-    <div class="panel"><h2>Cumulative units <small>1 unit per pick at −110</small></h2><div class="body">
-      <div class="legend">${MODELS.map(m => `<span><i style="background:${m.color}"></i>${m.label}</span>`).join('')}</div>${unitsChart(stats)}</div></div>
-    <div class="panel"><h2>Head-to-head <small>${common.length} games graded for all three models</small></h2><div class="body">
-      ${common.length ? `<div class="strip" style="margin:0">${h2h.map(x => `<div class="stat"><div class="k" style="color:${x.m.color}">${x.m.label}</div>
-        <div class="v num">${x.w}-${x.l}</div><div class="d">${fmt(x.w / common.length * 100)}% ATS</div></div>`).join('')}</div>`
-        : '<div class="mut">Appears once v3 has graded picks (v3 started Nov 17).</div>'}</div></div>
-    <div class="panel"><h2>Notes</h2><div class="body mut">
-      High / Medium / Low = model edge vs the line of 8+, 4–8 and under 4 points (formula uses its own cover confidence).
-      v3's box-score share is ${esc(S.meta.trust || 'fixed at 25% for now')}. Small samples swing a lot — judge after a few hundred picks.</div></div>`;
+    <div class="panel"><h2>Units over time <small>cumulative, bets only</small></h2><div class="body">
+      <div class="legend">${MODELS.map(m => `<span><i style="background:${m.color}"></i>${m.label} <b class="num ${stats[m.key].units >= 0 ? 'pos' : 'neg'}">${unitsStr(stats[m.key].units)}</b></span>`).join('')}</div>${unitsChart(stats)}</div></div>
+    ${calibrationPanel()}
+    ${bucketTable('Bets by edge size', 'points between the model and the line · record, win %, +pending, units',
+      [['Under 4 pts', b => b.edge < 4], ['4–6 pts', b => b.edge >= 4 && b.edge < 6], ['6–10 pts', b => b.edge >= 6 && b.edge < 10], ['10+ pts', b => b.edge >= 10]], 'Edge')}
+    ${disagreementsPanel()}
+    ${betLog()}
+    <div class="panel"><h2>Every game, not just bets <small>for accuracy tracking; not a betting record</small></h2><div class="table-wrap"><table>
+      <thead><tr><th>Model</th><th class="r">ATS lean, all games</th><th class="r">Straight-up winners</th><th class="r">Avg margin miss</th></tr></thead>
+      <tbody>${every.map(({ m, s }) => `<tr><td><b style="color:${m.color}">${m.label}</b></td>
+        <td class="r num">${s.w}-${s.l}${s.w + s.l ? ` <span class="mut">${fmt(s.w / (s.w + s.l) * 100)}%</span>` : ''}</td>
+        <td class="r num">${s.su[1] ? `${s.su[0]}/${s.su[1]} <span class="mut">${fmt(s.su[0] / s.su[1] * 100, 0)}%</span>` : '—'}</td>
+        <td class="r num">${s.mae === null ? '—' : fmt(s.mae) + ' pts'}</td></tr>`).join('')}</tbody></table></div></div>
+    <div class="mut small" style="margin-bottom:8px">RETRO = a bet applied after the fact to the prediction and line stored before tip-off. Games predicted after tip-off never count as bets. Small samples swing a lot; judge after a few hundred bets.</div>`;
+  document.querySelectorAll('[data-lm]').forEach(b => b.onclick = () => { S.ui.log.model = b.dataset.lm; rerenderLog(); });
+  document.querySelectorAll('[data-lr]').forEach(b => b.onclick = () => { S.ui.log.res = b.dataset.lr; rerenderLog(); });
+}
+function rerenderLog() {
+  document.getElementById('betlog').outerHTML = betLog();
+  document.querySelectorAll('[data-lm]').forEach(b => b.onclick = () => { S.ui.log.model = b.dataset.lm; rerenderLog(); });
+  document.querySelectorAll('[data-lr]').forEach(b => b.onclick = () => { S.ui.log.res = b.dataset.lr; rerenderLog(); });
 }
 
 /* ================= RATINGS ================= */
@@ -395,33 +521,34 @@ function renderTeam(id) {
       <tbody>${rows || '<tr><td colspan="7" class="mut">No predicted games yet.</td></tr>'}</tbody></table></div></div>`;
 }
 
-/* ================= RESULTS ================= */
+
+/* ================= RESULTS (official picks) ================= */
 function renderResults() {
-  const dates = [...new Set(S.games.filter(g => g.final).map(g => g.date))].sort().reverse();
-  if (!dates.length) { $app.innerHTML = '<div class="empty">No graded games yet.</div>'; return; }
-  const ui = S.ui.results = S.ui.results || { date: dates[0], conf: 'all' };
-  let gs = S.games.filter(g => g.date === ui.date && g.final);
-  if (ui.conf === 'high') gs = gs.filter(g => MODELS.some(m => (pick(g, m.key) || {}).conf === 'High'));
-  const tally = key => { const rs = gs.map(g => result(g, key)); return [rs.filter(r => r === 'W').length, rs.filter(r => r === 'L').length]; };
-  const last7 = new Set(dates.slice(0, 7));
-  const wk = MODELS.map(m => { const s = modelStats(m.key, S.games.filter(g => last7.has(g.date))); return { m, s }; });
+  const dates = [...new Set(S.games.filter(g => betOf(g, OFFICIAL)).map(g => g.date))].sort().reverse();
+  if (!dates.length) { $app.innerHTML = '<div class="page-head"><div><h1>Results</h1></div></div><div class="empty">No official picks yet.</div>'; return; }
+  const ui = S.ui.results = S.ui.results || { date: dates[0] };
+  if (!dates.includes(ui.date)) ui.date = dates[0];
+  const gs = S.games.filter(g => g.date === ui.date && betOf(g, OFFICIAL))
+    .sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+  const day = betStats(OFFICIAL, gs), season = betStats(OFFICIAL, S.games);
+  const last7 = new Set(dates.slice(0, 7)), wk = betStats(OFFICIAL, S.games.filter(g => last7.has(g.date)));
   $app.innerHTML = `
-    <div class="page-head"><div><h1>Results</h1><div class="sub">${niceDate(ui.date, { weekday: 'long', month: 'long', day: 'numeric' })} · ${gs.length} graded games</div></div>
+    <div class="page-head"><div><h1>Results</h1><div class="sub">Official picks (v3) · ${niceDate(ui.date, { weekday: 'long', month: 'long', day: 'numeric' })} · other models on the <a href="#/models" class="link-inline">Models</a> tab</div></div>
       <select class="select" id="rdate">${dates.map(d => `<option value="${d}" ${d === ui.date ? 'selected' : ''}>${niceDate(d)}</option>`).join('')}</select></div>
-    <div class="strip">${MODELS.map(m => { const [w, l] = tally(m.key); return `<div class="stat"><div class="k" style="color:${m.color}">${m.label} this day</div><div class="v num">${w}-${l}</div><div class="d">${w + l ? fmt(w / (w + l) * 100, 0) + '% ATS' : 'no graded picks'}</div></div>`; }).join('')}
-      ${wk.map(x => `<div class="stat"><div class="k" style="color:${x.m.color}">${x.m.label} last ${last7.size} days</div><div class="v num">${x.s.w}-${x.s.l}</div><div class="d">${x.s.pct === null ? '—' : fmt(x.s.pct, 0) + '% · ' + sgn(x.s.units) + 'u'}</div></div>`).join('')}</div>
-    <div class="controls"><button class="chip ${ui.conf === 'all' ? 'on' : ''}" data-c="all">All games</button>
-      <button class="chip ${ui.conf === 'high' ? 'on' : ''}" data-c="high">Any high-confidence pick</button></div>
-    <div class="panel"><div class="table-wrap"><table><thead><tr><th>Matchup</th><th class="r">Final</th><th class="r">Line</th>
-      ${MODELS.map(m => `<th style="color:${m.color}">${m.label} pick</th>`).join('')}</tr></thead><tbody>
-      ${gs.map(g => `<tr><td><div class="teamcell">${logo(g.away, 'logo-sm')}${esc(shortName(g.away))} <span class="mut">${g.neutral ? 'vs' : '@'}</span> ${logo(g.home, 'logo-sm')}${esc(shortName(g.home))}</div></td>
-        <td class="r num"><b>${g.final.away}-${g.final.home}</b></td>
-        <td class="r num">${g.spread === null || g.spread === undefined ? '—' : esc(shortName(g.home)) + ' ' + fmtLine(g.spread)}</td>
-        ${MODELS.map(m => { const p = pick(g, m.key), r = result(g, m.key);
-          return `<td>${p ? `${esc(p.label)} ${r ? `<span class="res ${r}">${r}</span>` : ''} ${p.conf ? `<span class="conf ${p.conf}">${p.conf[0]}</span>` : ''}` : '<span class="mut">—</span>'}</td>`; }).join('')}</tr>`).join('')}
+    <div class="strip">
+      <div class="stat accent"><div class="k">This day</div><div class="v num">${recStr(day)}</div><div class="d">${day.pending ? day.pending + ' pending · ' : ''}${day.n ? unitsStr(day.units) : 'not graded yet'}</div></div>
+      <div class="stat"><div class="k">Last ${last7.size} pick days</div><div class="v num">${recStr(wk)}</div><div class="d">${wk.n ? fmt(wk.pct, 0) + '% · ' + unitsStr(wk.units) : '—'}</div></div>
+      <div class="stat"><div class="k">Season record</div><div class="v num">${recStr(season)}</div><div class="d">${season.pct === null ? 'no graded picks yet' : fmt(season.pct) + '% · break-even ' + S.meta.breakeven + '%'}</div></div>
+      <div class="stat"><div class="k">Season units</div><div class="v num ${season.units >= 0 ? 'pos' : 'neg'}">${unitsStr(season.units)}</div><div class="d">${season.bets} picks · ${season.pending} pending</div></div>
+    </div>
+    <div class="panel"><div class="table-wrap"><table><thead><tr><th>Matchup</th><th class="r">Final</th><th>Official pick</th><th class="r">To cover</th><th class="r">Edge</th><th>Result</th><th class="r">Units</th></tr></thead><tbody>
+      ${gs.map(g => { const b = betOf(g, OFFICIAL), r = betResult(g, OFFICIAL);
+        return `<tr><td><div class="teamcell">${logo(g.away, 'logo-sm')}${esc(shortName(g.away))} <span class="mut">${g.neutral ? 'vs' : '@'}</span> ${logo(g.home, 'logo-sm')}${esc(shortName(g.home))}</div></td>
+        <td class="r num">${g.final ? `<b>${g.final.away}-${g.final.home}</b>` : `<span class="mut">${esc(etTime(g.time))}</span>`}</td>
+        <td><b>${esc(b.label)}</b> ${retroTag(b)}</td><td class="r num">${fmt(b.prob * 100, 0)}%</td><td class="r num">${fmt(b.edge)}</td>
+        <td>${resChip(r)}</td><td class="r num ${r === 'W' ? 'pos' : r === 'L' ? 'neg' : 'mut'}">${r ? unitsStr(betUnits(b, r)) : '—'}</td></tr>`; }).join('')}
     </tbody></table></div></div>`;
   document.getElementById('rdate').onchange = e => { ui.date = e.target.value; renderResults(); };
-  document.querySelectorAll('[data-c]').forEach(b => b.onclick = () => { ui.conf = b.dataset.c; renderResults(); });
 }
 
 /* ---------------- boot ---------------- */

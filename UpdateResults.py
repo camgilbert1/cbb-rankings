@@ -10,6 +10,8 @@ import os
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
+import Betting
+
 # Load environment variables
 load_dotenv()
 
@@ -149,11 +151,21 @@ def store_results_to_databricks(results_df):
         print(f"❌ Error uploading results: {e}")
 
 
-def update_prediction_outcomes():
+OUTCOME_COLUMNS = ['game_date', 'home_team', 'away_team', 'home_adj_em', 'away_adj_em', 'home_oe', 'away_oe',
+                   'home_de', 'away_de', 'home_rank', 'away_rank', 'predicted_winner', 'predicted_home_score',
+                   'predicted_away_score', 'predicted_margin', 'win_probability', 'confidence', 'vegas_spread',
+                   'cover_pick', 'actual_home_score', 'actual_away_score', 'actual_margin', 'actual_winner',
+                   'su_correct', 'ats_correct', 'margin_error', 'recorded_at'] + [c for c, _ in Betting.BET_COLUMNS]
+
+
+def update_prediction_outcomes(outcomes_table='workspace.default.prediction_outcomes',
+                               history_table='workspace.default.prediction_history',
+                               results_table='workspace.default.game_results'):
     """
     Materialize prediction outcomes by joining prediction_history with game_results.
-    Writes one row per completed game with KenPom features + actual result + W/L flags.
-    Used as training data for the neural network model.
+    Writes one row per completed game with KenPom features + actual result + W/L flags,
+    plus the Formula's bet (a bet's result is ats_correct on rows where is_bet is true).
+    Table names are parameters so tests can run against scratch copies.
     """
     print("\nUpdating prediction outcomes...")
 
@@ -166,8 +178,8 @@ def update_prediction_outcomes():
         )
         cursor = connection.cursor()
 
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS workspace.default.prediction_outcomes (
+        cursor.execute(f"""
+            CREATE TABLE IF NOT EXISTS {outcomes_table} (
                 game_date DATE,
                 home_team STRING,
                 away_team STRING,
@@ -199,9 +211,14 @@ def update_prediction_outcomes():
             USING DELTA
         """)
 
-        # Insert only newly completed games not already in prediction_outcomes
-        cursor.execute("""
-            INSERT INTO workspace.default.prediction_outcomes
+        Betting.ensure_bet_columns(cursor, outcomes_table)
+        Betting.ensure_bet_columns(cursor, history_table)   # no-op once GamePredictions has run
+
+        # Insert only newly completed games not already in prediction_outcomes.
+        # Columns are named so the insert can't shift values when the table gains columns.
+        bet_select = ',\n                '.join(f"p.{c}" for c, _ in Betting.BET_COLUMNS)
+        cursor.execute(f"""
+            INSERT INTO {outcomes_table} ({', '.join(OUTCOME_COLUMNS)})
             SELECT
                 p.game_date,
                 p.home_team,
@@ -239,21 +256,22 @@ def update_prediction_outcomes():
                     ELSE 0
                 END AS ats_correct,
                 ((p.predicted_home_score - p.predicted_away_score) - (r.home_score - r.away_score)) AS margin_error,
-                current_timestamp() AS recorded_at
-            FROM workspace.default.prediction_history p
-            INNER JOIN workspace.default.game_results r
+                current_timestamp() AS recorded_at,
+                {bet_select}
+            FROM {history_table} p
+            INNER JOIN {results_table} r
                 ON p.home_team = r.home_team
                 AND p.away_team = r.away_team
                 AND ABS(DATEDIFF(p.game_date, r.game_date)) <= 1
             WHERE NOT EXISTS (
-                SELECT 1 FROM workspace.default.prediction_outcomes o
+                SELECT 1 FROM {outcomes_table} o
                 WHERE o.home_team = p.home_team
                   AND o.away_team = p.away_team
                   AND o.game_date = p.game_date
             )
         """)
 
-        cursor.execute("SELECT COUNT(*) FROM workspace.default.prediction_outcomes")
+        cursor.execute(f"SELECT COUNT(*) FROM {outcomes_table}")
         total = cursor.fetchone()[0]
         cursor.close()
         connection.close()

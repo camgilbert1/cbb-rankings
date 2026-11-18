@@ -28,6 +28,7 @@ from dotenv import load_dotenv
 import pytz
 
 from team_names import find_team_match
+import Betting
 from BackfillHistoricalData import (FEATURE_TABLE, fetch_espn_games_for_date, team_ratings,
                                     upload_features)
 
@@ -551,7 +552,7 @@ def upcoming_feature_rows(games, ratings_df, state):
                                 avg_o=ratings_df['adj_o'].mean(), avg_tempo=ratings_df['tempo'].mean())
 
 
-def generate_predictions(models, games, ratings_df, state, spreads=None):
+def generate_predictions(models, games, ratings_df, state, spreads=None, bet_params=Betting.SCATTER_DEFAULT):
     if not models or not games:
         return []
     margin = models.get('margin_model')
@@ -565,11 +566,15 @@ def generate_predictions(models, games, ratings_df, state, spreads=None):
     pred_margins = margin['model'].predict(X[margin['features']])
     pred_totals = (total['model'].predict(X[total['features']]) if PUBLISH_ML_TOTAL
                    else X['kp_total_est'].values)
-    return build_records(X, pred_margins, pred_totals, spreads, margin.get('version', 'unknown'))
+    return build_records(X, pred_margins, pred_totals, spreads, margin.get('version', 'unknown'),
+                         bet_params=bet_params)
 
 
-def build_records(X, pred_margins, pred_totals, spreads, version, extras=None):
-    """Prediction rows for upload. extras: optional list of dicts merged into each record."""
+def build_records(X, pred_margins, pred_totals, spreads, version, extras=None, bet_params=Betting.SCATTER_DEFAULT):
+    """
+    Prediction rows for upload. extras: optional list of dicts merged into each record.
+    Each row also carries the model's bet (Betting.make_bet on the stored, rounded margin).
+    """
     spreads = spreads or {}
     extras = extras or [{}] * len(X)
     records = []
@@ -590,6 +595,9 @@ def build_records(X, pred_margins, pred_totals, spreads, version, extras=None):
         else:
             ats_conf = 'Low'
 
+        # Bet on the margin as stored (rounded), the same number grading uses
+        bet = Betting.make_bet(game['home_team'], game['away_team'], round(pred_margin, 1), spread, bet_params)
+
         records.append({
             'game_date':               game['game_date'],
             'home_team':               game['home_team'],
@@ -602,12 +610,13 @@ def build_records(X, pred_margins, pred_totals, spreads, version, extras=None):
             'model_version':           version,
             'vegas_spread':            spread,
             'ats_confidence':          ats_conf,
+            **Betting.bet_fields(bet),
             **extra,
         })
     return records
 
 
-def run_v3(models, df_v2, games_today, ratings_df, state, spreads):
+def run_v3(models, df_v2, games_today, ratings_df, state, spreads, bet_params=Betting.SCATTER_DEFAULT):
     """
     v3 = box-score ratings model blended with the v2 KenPom model (see ModelV3.py).
     Any failure (e.g. box-score data unavailable) skips v3 with an Actions warning; v2 is unaffected.
@@ -657,7 +666,7 @@ def run_v3(models, df_v2, games_today, ratings_df, state, spreads):
         extras = [{'box_margin': round(float(b), 1), 'kp_margin': round(float(k), 1), 'box_share': round(float(s), 3)}
                   for b, k, s in zip(bx, kp, share)]
         return build_records(Xb, blended, Xb['kp_total_est'].values, spreads,
-                             f"v3_{datetime.now().strftime('%Y%m%d')}", extras)
+                             f"v3_{datetime.now().strftime('%Y%m%d')}", extras, bet_params=bet_params)
     except Exception as e:
         print(f"::warning::v3 skipped ({type(e).__name__}: {e}); v2 predictions unaffected")
         return []
@@ -701,11 +710,14 @@ def upload_predictions(records, family=MODEL_FAMILY, table=PREDICTIONS_TABLE):
                 cursor.execute(f"ALTER TABLE {table} ADD COLUMNS ({col_def})")
             except Exception:
                 pass
+        Betting.ensure_bet_columns(cursor, table)
 
         # One source row per game (v2 and v3 are stored side by side, matched by family).
         # Team names are compared with apostrophes stripped: stored names have lost them
         # (see name_key), and the same escaping is used here so new rows match old ones.
         num = lambda v: 'NULL' if v is None else v
+        bet_names = [c for c, _ in Betting.BET_COLUMNS]
+        bet_casts = ', '.join(f"CAST({c} AS {kind}) AS {c}" for c, kind in Betting.BET_COLUMNS)
         rows, seen = [], set()
         for rec in records:
             key = (rec['game_date'], name_key(rec['home_team']), name_key(rec['away_team']))
@@ -720,10 +732,12 @@ def upload_predictions(records, family=MODEL_FAMILY, table=PREDICTIONS_TABLE):
                 {rec['ml_predicted_margin']}, {rec['ml_predicted_total']},
                 {rec['ml_win_probability']}, '{rec['model_version']}',
                 {num(rec['vegas_spread'])}, '{rec['ats_confidence']}', '{family}',
-                {num(rec.get('box_margin'))}, {num(rec.get('kp_margin'))}, {num(rec.get('box_share'))})""")
+                {num(rec.get('box_margin'))}, {num(rec.get('kp_margin'))}, {num(rec.get('box_share'))},
+                {', '.join(Betting.sql_value(rec.get(c)) for c in bet_names)})""")
         value_cols = ('game_date, home_team, away_team, ml_predicted_home_score, ml_predicted_away_score, '
                       'ml_predicted_margin, ml_predicted_total, ml_win_probability, model_version, '
-                      'vegas_spread, ats_confidence, model_family, box_margin, kp_margin, box_share')
+                      'vegas_spread, ats_confidence, model_family, box_margin, kp_margin, box_share, '
+                      + ', '.join(bet_names))
         cursor.execute(f"""
             MERGE INTO {table} AS t
             USING (
@@ -736,7 +750,7 @@ def upload_predictions(records, family=MODEL_FAMILY, table=PREDICTIONS_TABLE):
                        model_version, CAST(vegas_spread AS DOUBLE) AS vegas_spread,
                        ats_confidence, model_family,
                        CAST(box_margin AS DOUBLE) AS box_margin, CAST(kp_margin AS DOUBLE) AS kp_margin,
-                       CAST(box_share AS DOUBLE) AS box_share
+                       CAST(box_share AS DOUBLE) AS box_share, {bet_casts}
                 FROM VALUES {', '.join(rows)} AS v({value_cols})
             ) AS s
             ON  t.game_date = s.game_date
@@ -753,7 +767,8 @@ def upload_predictions(records, family=MODEL_FAMILY, table=PREDICTIONS_TABLE):
                 generated_at = current_timestamp(),
                 vegas_spread = s.vegas_spread,
                 ats_confidence = s.ats_confidence,
-                box_margin = s.box_margin, kp_margin = s.kp_margin, box_share = s.box_share
+                box_margin = s.box_margin, kp_margin = s.kp_margin, box_share = s.box_share,
+                {', '.join(f'{c} = s.{c}' for c in bet_names)}
             WHEN NOT MATCHED THEN INSERT
                 (game_date, home_team, away_team,
                  ml_predicted_home_score, ml_predicted_away_score,
@@ -761,7 +776,7 @@ def upload_predictions(records, family=MODEL_FAMILY, table=PREDICTIONS_TABLE):
                  ml_win_probability, model_version, generated_at,
                  vegas_spread, ats_confidence,
                  actual_home_score, actual_away_score, ml_ats_correct, model_family,
-                 box_margin, kp_margin, box_share)
+                 box_margin, kp_margin, box_share, {', '.join(bet_names)})
             VALUES
                 (s.game_date, s.home_team, s.away_team,
                  s.ml_predicted_home_score, s.ml_predicted_away_score,
@@ -769,7 +784,7 @@ def upload_predictions(records, family=MODEL_FAMILY, table=PREDICTIONS_TABLE):
                  s.ml_win_probability, s.model_version, current_timestamp(),
                  s.vegas_spread, s.ats_confidence,
                  NULL, NULL, NULL, s.model_family,
-                 s.box_margin, s.kp_margin, s.box_share)
+                 s.box_margin, s.kp_margin, s.box_share, {', '.join(f's.{c}' for c in bet_names)})
         """)
         cursor.close()
         conn.close()
@@ -832,11 +847,19 @@ def main():
     today_date = games_today[0]['game_date'] if games_today else datetime.now(EASTERN).strftime('%Y-%m-%d')
     spreads = fetch_spreads_from_history(today_date)
     print(f"  Loaded spreads for {len(spreads)} games from prediction_history")
-    prediction_records = generate_predictions(models, games_today, ratings_df, state, spreads=spreads)
+    try:
+        conn = db_connect(); cursor = conn.cursor()
+        bet_params = Betting.fit_for_run(cursor, today_date)
+        cursor.close(); conn.close()
+    except Exception as e:
+        bet_params = Betting.SCATTER_DEFAULT
+        print(f"  Could not fit the bet scatter ({e}); using the default")
+    prediction_records = generate_predictions(models, games_today, ratings_df, state, spreads=spreads,
+                                              bet_params=bet_params)
     upload_predictions(prediction_records)
 
     # 6b. v3 (box-score ratings + KenPom blend), published alongside v2
-    v3_records = run_v3(models, df, games_today, ratings_df, state, spreads)
+    v3_records = run_v3(models, df, games_today, ratings_df, state, spreads, bet_params=bet_params)
     import ModelV3
     upload_predictions(v3_records, family=ModelV3.MODEL_FAMILY)
     if v3_records:
