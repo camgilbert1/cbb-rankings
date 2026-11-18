@@ -62,6 +62,12 @@ def load_tables():
                              WHERE game_date >= '{s}' AND model_family IN ('v2', 'v3')"""),
         'gold': query(cur, "SELECT * FROM workspace.default_gold.gold_team_rankings"),
     }
+    try:     # first-half scores (BackfillHalves.py) for grading the 1H tab; the site builds without them
+        t['halves'] = query(cur, f"SELECT game_date, home_team, away_team, home_h1, away_h1 FROM workspace.default.game_halves WHERE game_date >= '{s}'")
+        t['halves']['game_date'] = pd.to_datetime(t['halves']['game_date']).dt.strftime('%Y-%m-%d')
+    except Exception as e:
+        print(f"  (first-half scores unavailable: {e})")
+        t['halves'] = pd.DataFrame(columns=['game_date', 'home_team', 'away_team', 'home_h1', 'away_h1'])
     cur.close(); conn.close()
     for k in ('history', 'outcomes', 'results', 'ml'):
         t[k]['game_date'] = pd.to_datetime(t[k]['game_date']).dt.strftime('%Y-%m-%d')
@@ -194,7 +200,7 @@ def build_games(t, key2id, id2name, neutral, finals, slates):
             games[k] = {'date': date, 'time': None, 'state': None, 'status': None,
                         'home': {'id': hid, 'name': id2name.get(hid, home)}, 'away': {'id': aid, 'name': id2name.get(aid, away)},
                         'neutral': neutral.get((date, hid, aid), False), 'spread': None, 'total_line': None,
-                        'formula': None, 'v2': None, 'v3': None, 'final': None}
+                        'formula': None, 'v2': None, 'v3': None, 'final': None, 'h1_final': None}
         return games[k]
 
     hist = t['history'].sort_values('prediction_date').drop_duplicates(['game_date', 'home_team', 'away_team'], keep='last')
@@ -241,6 +247,13 @@ def build_games(t, key2id, id2name, neutral, finals, slates):
         elif flipped in games:
             g = games[flipped]
             g['final'] = g['final'] or {'home': int(r.away_score), 'away': int(r.home_score)}
+    # Actual first-half scores (graded on the 1H tab), matched the same way: as stored, then flipped
+    for r in t['halves'].itertuples(index=False):
+        same, flipped = (r.game_date, nk(r.home_team), nk(r.away_team)), (r.game_date, nk(r.away_team), nk(r.home_team))
+        if same in games:
+            games[same]['h1_final'] = {'home': int(r.home_h1), 'away': int(r.away_h1)}
+        elif flipped in games:
+            games[flipped]['h1_final'] = {'home': int(r.away_h1), 'away': int(r.home_h1)}
     # ESPN slate data (ids, times, live status, records) for the dates being shown live
     for sg in slates:
         k = (sg['date'], nk(sg['home']['name']), nk(sg['away']['name']))

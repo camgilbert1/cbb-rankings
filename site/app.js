@@ -322,10 +322,34 @@ function renderH1() {
   let gs = (q ? S.games.filter(matches) : day).filter(hasH1);
   gs = [...gs].sort(q ? (a, b) => b.date.localeCompare(a.date) || (a.time || '').localeCompare(b.time || '')
                       : (a, b) => (a.time || '').localeCompare(b.time || ''));
+  // Accuracy tracker: every game with a v3 1H prediction and an actual first-half score.
+  // Benchmark = "half of v3's full-game prediction"; if we can't beat that, the 1H model adds nothing.
+  const graded = S.games.filter(g => hasH1(g) && g.h1_final)
+    .sort((a, b) => b.date.localeCompare(a.date) || (b.time || '').localeCompare(a.time || ''));
+  const rmse = xs => xs.length ? Math.sqrt(xs.reduce((s, x) => s + x * x, 0) / xs.length) : null;
+  const am = g => g.h1_final.home - g.h1_final.away, at = g => g.h1_final.home + g.h1_final.away;
+  const pm = g => g[OFFICIAL].h1_home - g[OFFICIAL].h1_away, pt = g => g[OFFICIAL].h1_home + g[OFFICIAL].h1_away;
+  const mErr = rmse(graded.map(g => pm(g) - am(g))), tErr = rmse(graded.map(g => pt(g) - at(g)));
+  const mHalf = rmse(graded.map(g => g[OFFICIAL].margin / 2 - am(g)));
+  const tHalf = rmse(graded.map(g => (g[OFFICIAL].home + g[OFFICIAL].away) / 2 - at(g)));
+  const decided = graded.filter(g => am(g) !== 0);
+  const leader = decided.length ? decided.filter(g => Math.sign(pm(g)) === Math.sign(am(g))).length / decided.length : null;
+  const vs = (ours, half) => ours === null ? '' : `vs ${fmt(half, 2)} for half the full game · <span class="${ours <= half ? 'pos' : 'neg'}">${ours <= half ? 'better' : 'worse'}</span>`;
+  const recentRows = graded.slice(0, 8).map(g => `<div class="recent-row"><span class="rr-pick">${esc(shortName(g.away))} ${g.neutral ? 'vs' : '@'} ${esc(shortName(g.home))}</span>
+      <span class="mut small num">pred ${fmt(g[OFFICIAL].h1_away, 0)}-${fmt(g[OFFICIAL].h1_home, 0)} · actual ${g.h1_final.away}-${g.h1_final.home} · ${niceDate(g.date, { month: 'short', day: 'numeric' })}</span></div>`).join('');
+  const tracker = `<div class="strip">
+      <div class="stat accent"><div class="k">Graded</div><div class="v num">${graded.length}</div><div class="d">first halves with a v3 prediction</div></div>
+      <details class="stat tracker"><summary><div class="k">1H margin error <span class="caret">▾</span></div><div class="v num">${mErr === null ? '—' : fmt(mErr, 2)}</div>
+        <div class="d">${mErr === null ? 'no graded games yet' : vs(mErr, mHalf)}</div></summary>
+        <div class="recent"><div class="mut small">Last 8 graded</div>${recentRows || '<div class="mut small">No graded games yet.</div>'}</div></details>
+      <div class="stat"><div class="k">1H total error</div><div class="v num">${tErr === null ? '—' : fmt(tErr, 2)}</div><div class="d">${tErr === null ? 'backtest ~10.3' : vs(tErr, tHalf)}</div></div>
+      <div class="stat"><div class="k">1H leader</div><div class="v num">${leader === null ? '—' : fmt(leader * 100, 1) + '%'}</div><div class="d">picked the team ahead at the half · backtest ~67%</div></div>
+    </div>`;
   $app.innerHTML = `
     <div class="page-head"><div><h1>First Half</h1>
       <div class="sub">${niceDate(ui.date, { weekday: 'long', month: 'long', day: 'numeric' })} · v3 first-half predictions · no bets, for checking against the books</div></div>
       <select class="select" id="date">${dates.map(d => `<option value="${d}" ${d === ui.date ? 'selected' : ''}>${niceDate(d)}</option>`).join('')}</select></div>
+    ${tracker}
     <div class="controls"><span class="spacer"></span>
       <input class="search" id="gq" type="search" placeholder="Search teams…" value="${esc(ui.q || '')}" aria-label="Search teams"></div>
     ${gs.length ? `<div class="cards">${gs.map(g => h1Card(g, !!q)).join('')}</div>`
