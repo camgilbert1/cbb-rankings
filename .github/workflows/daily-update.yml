@@ -46,6 +46,16 @@ jobs:
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
         run: python APIPull.py
 
+      - name: Snapshot CBBD ratings (SRS, Elo, adjusted) - record only
+        timeout-minutes: 5
+        continue-on-error: true
+        env:
+          CBBD_API_KEY: ${{ secrets.CBBD_API_KEY }}
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_HTTP_PATH: ${{ secrets.DATABRICKS_HTTP_PATH }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+        run: python CBBDRatings.py
+
       - name: Generate game predictions
         timeout-minutes: 20
         env:
