@@ -468,7 +468,7 @@ PREDICTION_HISTORY_TABLE = 'workspace.default.prediction_history'
 HISTORY_COLUMNS = ['game_date', 'game_time', 'home_team', 'away_team', 'predicted_winner', 'win_probability',
                    'predicted_home_score', 'predicted_away_score', 'confidence', 'vegas_spread', 'cover_pick',
                    'cover_confidence', 'prediction_date', 'home_adj_em', 'away_adj_em', 'home_oe', 'away_oe',
-                   'home_de', 'away_de', 'home_rank', 'away_rank'] + [c for c, _ in Betting.BET_COLUMNS] + ['vegas_total']
+                   'home_de', 'away_de', 'home_rank', 'away_rank'] + [c for c, _ in Betting.BET_COLUMNS] + ['vegas_total', 'neutral_site']
 
 
 def upload_predictions_to_databricks(predictions_df, table=PREDICTION_HISTORY_TABLE):
@@ -544,10 +544,11 @@ def upload_predictions_to_databricks(predictions_df, table=PREDICTION_HISTORY_TA
         # Delete ONLY predictions for games we're about to regenerate
         # This preserves predictions for games that have already started (lock mechanism)
         Betting.ensure_bet_columns(cursor, table)
-        try:
-            cursor.execute(f"ALTER TABLE {table} ADD COLUMNS (vegas_total DOUBLE)")   # over/under line
-        except Exception:
-            pass  # already exists
+        for col_def in ("vegas_total DOUBLE", "neutral_site BOOLEAN"):   # over/under line, neutral flag
+            try:
+                cursor.execute(f"ALTER TABLE {table} ADD COLUMNS ({col_def})")
+            except Exception:
+                pass  # already exists
 
         print("  Removing old predictions for unstarted games...")
         deleted_count = 0
@@ -598,7 +599,8 @@ def upload_predictions_to_databricks(predictions_df, table=PREDICTION_HISTORY_TA
                     {row['home_rank']},
                     {row['away_rank']},
                     {bet_sql},
-                    {Betting.sql_value(row.get('vegas_total'))}
+                    {Betting.sql_value(row.get('vegas_total'))},
+                    {Betting.sql_value(bool(row.get('neutral_site', False)))}
                 )
             """)
 
@@ -813,6 +815,7 @@ def main(date=None):
             'away_rank': features['away_rank'] if features else 0,
             **Betting.bet_fields(bet),
             'vegas_total': vegas_total,  # over/under line; None = not posted
+            'neutral_site': neutral_site,  # ESPN's flag at prediction time (no home court when True)
         })
 
     # Convert to DataFrame

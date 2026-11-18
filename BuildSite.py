@@ -215,21 +215,32 @@ def build_games(t, key2id, id2name, neutral, finals, slates):
                              'box_share': clean(r.box_share), 'bet': bet_of(r)}
         if g['spread'] is None:
             g['spread'] = clean(r.vegas_spread)
+    # ESPN can relabel home/away after we predict (neutral sites). Each lookup below tries the game as
+    # stored first, then the two teams the other way round, and reads each team's score by name.
     for r in t['results'].itertuples(index=False):
-        if (r.game_date, nk(r.home_team), nk(r.away_team)) in games:
-            g = get(r.game_date, r.home_team, r.away_team)
+        same, flipped = (r.game_date, nk(r.home_team), nk(r.away_team)), (r.game_date, nk(r.away_team), nk(r.home_team))
+        if same in games:
+            g = games[same]
             g['final'] = g['final'] or {'home': int(r.home_score), 'away': int(r.away_score)}
+        elif flipped in games:
+            g = games[flipped]
+            g['final'] = g['final'] or {'home': int(r.away_score), 'away': int(r.home_score)}
     # ESPN slate data (ids, times, live status, records) for the dates being shown live
     for sg in slates:
         k = (sg['date'], nk(sg['home']['name']), nk(sg['away']['name']))
+        sides = {'home': 'home', 'away': 'away'}            # our side -> ESPN's side
         if k not in games:
-            continue
+            k = (sg['date'], nk(sg['away']['name']), nk(sg['home']['name']))
+            sides = {'home': 'away', 'away': 'home'}
+            if k not in games:
+                continue
         g = games[k]
         g.update({'time': sg['time'] or g['time'], 'state': sg['state'], 'status': sg['status'], 'neutral': sg['neutral']})
         for side in ('home', 'away'):
-            g[side].update({'id': sg[side]['id'], 'record': sg[side]['record'], 'short': sg[side]['short']})
+            src = sg[sides[side]]
+            g[side].update({'id': src['id'], 'record': src['record'], 'short': src['short']})
         if sg['state'] == 'post' and g['final'] is None and sg['home']['score'] not in (None, ''):
-            g['final'] = {'home': int(sg['home']['score']), 'away': int(sg['away']['score'])}
+            g['final'] = {'home': int(sg[sides['home']]['score']), 'away': int(sg[sides['away']]['score'])}
     for g in games.values():
         for side in ('home', 'away'):
             if g[side]['id'] is not None:
@@ -238,6 +249,10 @@ def build_games(t, key2id, id2name, neutral, finals, slates):
             f = finals.get((g['date'], g['home']['id'], g['away']['id']))
             if f:
                 g['final'] = {'home': f[0], 'away': f[1]}
+            else:
+                f = finals.get((g['date'], g['away']['id'], g['home']['id']))   # relabelled home/away
+                if f:
+                    g['final'] = {'home': f[1], 'away': f[0]}
     return sorted(games.values(), key=lambda g: (g['date'], g['time'] or '', g['home']['name']))
 
 

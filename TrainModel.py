@@ -480,7 +480,13 @@ def fetch_spreads_from_history(game_date):
         rows = cursor.fetchall()
         cursor.close()
         conn.close()
-        return {(name_key(r[0]), name_key(r[1])): float(r[2]) for r in rows}
+        spreads = {(name_key(r[0]), name_key(r[1])): float(r[2]) for r in rows}
+        # If ESPN has relabelled home/away since GamePredictions ran (neutral sites), the same game is
+        # looked up the other way round: the line from the other team's side is the opposite number
+        # (George Mason -13 == Bradley +13). Exact matches above always take precedence.
+        for (h, a), s in list(spreads.items()):
+            spreads.setdefault((a, h), -s + 0.0)
+        return spreads
     except Exception:
         return {}
 
@@ -610,6 +616,7 @@ def build_records(X, pred_margins, pred_totals, spreads, version, extras=None, b
             'model_version':           version,
             'vegas_spread':            spread,
             'ats_confidence':          ats_conf,
+            'neutral_site':            bool(game.get('neutral_site', False)),   # ESPN flag at prediction time
             **Betting.bet_fields(bet),
             **extra,
         })
@@ -705,6 +712,7 @@ def upload_predictions(records, family=MODEL_FAMILY, table=PREDICTIONS_TABLE):
             "model_family STRING",
             # v3 components: box-score model margin, KenPom (v2) model margin, weight on the box model
             "box_margin DOUBLE", "kp_margin DOUBLE", "box_share DOUBLE",
+            "neutral_site BOOLEAN",   # ESPN's neutral flag at prediction time (no home court when True)
         ]:
             try:
                 cursor.execute(f"ALTER TABLE {table} ADD COLUMNS ({col_def})")
@@ -733,10 +741,11 @@ def upload_predictions(records, family=MODEL_FAMILY, table=PREDICTIONS_TABLE):
                 {rec['ml_win_probability']}, '{rec['model_version']}',
                 {num(rec['vegas_spread'])}, '{rec['ats_confidence']}', '{family}',
                 {num(rec.get('box_margin'))}, {num(rec.get('kp_margin'))}, {num(rec.get('box_share'))},
+                {Betting.sql_value(bool(rec.get('neutral_site', False)))},
                 {', '.join(Betting.sql_value(rec.get(c)) for c in bet_names)})""")
         value_cols = ('game_date, home_team, away_team, ml_predicted_home_score, ml_predicted_away_score, '
                       'ml_predicted_margin, ml_predicted_total, ml_win_probability, model_version, '
-                      'vegas_spread, ats_confidence, model_family, box_margin, kp_margin, box_share, '
+                      'vegas_spread, ats_confidence, model_family, box_margin, kp_margin, box_share, neutral_site, '
                       + ', '.join(bet_names))
         cursor.execute(f"""
             MERGE INTO {table} AS t
@@ -750,7 +759,7 @@ def upload_predictions(records, family=MODEL_FAMILY, table=PREDICTIONS_TABLE):
                        model_version, CAST(vegas_spread AS DOUBLE) AS vegas_spread,
                        ats_confidence, model_family,
                        CAST(box_margin AS DOUBLE) AS box_margin, CAST(kp_margin AS DOUBLE) AS kp_margin,
-                       CAST(box_share AS DOUBLE) AS box_share, {bet_casts}
+                       CAST(box_share AS DOUBLE) AS box_share, CAST(neutral_site AS BOOLEAN) AS neutral_site, {bet_casts}
                 FROM VALUES {', '.join(rows)} AS v({value_cols})
             ) AS s
             ON  t.game_date = s.game_date
@@ -768,6 +777,7 @@ def upload_predictions(records, family=MODEL_FAMILY, table=PREDICTIONS_TABLE):
                 vegas_spread = s.vegas_spread,
                 ats_confidence = s.ats_confidence,
                 box_margin = s.box_margin, kp_margin = s.kp_margin, box_share = s.box_share,
+                neutral_site = s.neutral_site,
                 {', '.join(f'{c} = s.{c}' for c in bet_names)}
             WHEN NOT MATCHED THEN INSERT
                 (game_date, home_team, away_team,
@@ -776,7 +786,7 @@ def upload_predictions(records, family=MODEL_FAMILY, table=PREDICTIONS_TABLE):
                  ml_win_probability, model_version, generated_at,
                  vegas_spread, ats_confidence,
                  actual_home_score, actual_away_score, ml_ats_correct, model_family,
-                 box_margin, kp_margin, box_share, {', '.join(bet_names)})
+                 box_margin, kp_margin, box_share, neutral_site, {', '.join(bet_names)})
             VALUES
                 (s.game_date, s.home_team, s.away_team,
                  s.ml_predicted_home_score, s.ml_predicted_away_score,
@@ -784,7 +794,7 @@ def upload_predictions(records, family=MODEL_FAMILY, table=PREDICTIONS_TABLE):
                  s.ml_win_probability, s.model_version, current_timestamp(),
                  s.vegas_spread, s.ats_confidence,
                  NULL, NULL, NULL, s.model_family,
-                 s.box_margin, s.kp_margin, s.box_share, {', '.join(f's.{c}' for c in bet_names)})
+                 s.box_margin, s.kp_margin, s.box_share, s.neutral_site, {', '.join(f's.{c}' for c in bet_names)})
         """)
         cursor.close()
         conn.close()

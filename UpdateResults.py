@@ -151,6 +151,34 @@ def store_results_to_databricks(results_df):
         print(f"❌ Error uploading results: {e}")
 
 
+def matched_results_sql(pred_table, results_table, partition_extra='', where=''):
+    """
+    Subquery: each prediction row (alias columns p.*) joined to its game result, plus res_home / res_away =
+    the final score of the PREDICTION's home / away team.
+
+    ESPN sometimes relabels home/away after we predict (neutral-site games), so a result matches the
+    prediction's two teams in either order, within a day, comparing names without apostrophes. Each team's
+    score is read by name, so the prediction's own labels, line and bet are never changed. A same-orientation
+    match always wins (rank 1), then the closest date; filter on rn = 1. Games that match exactly today
+    match exactly the same way.
+    """
+    nk = lambda col: f"REPLACE({col}, CHR(39), '')"
+    same = f"({nk('r.home_team')} = {nk('p.home_team')} AND {nk('r.away_team')} = {nk('p.away_team')})"
+    swapped = f"({nk('r.home_team')} = {nk('p.away_team')} AND {nk('r.away_team')} = {nk('p.home_team')})"
+    return f"""(
+        SELECT p.*,
+               CASE WHEN {same} THEN r.home_score ELSE r.away_score END AS res_home,
+               CASE WHEN {same} THEN r.away_score ELSE r.home_score END AS res_away,
+               ROW_NUMBER() OVER (PARTITION BY p.game_date, p.home_team, p.away_team{partition_extra}
+                                  ORDER BY CASE WHEN {same} THEN 0 ELSE 1 END,
+                                           ABS(DATEDIFF(p.game_date, r.game_date))) AS rn
+        FROM {pred_table} p
+        JOIN {results_table} r
+          ON ABS(DATEDIFF(p.game_date, r.game_date)) <= 1 AND ({same} OR {swapped})
+        WHERE r.home_score IS NOT NULL {where}
+    )"""
+
+
 OUTCOME_COLUMNS = ['game_date', 'home_team', 'away_team', 'home_adj_em', 'away_adj_em', 'home_oe', 'away_oe',
                    'home_de', 'away_de', 'home_rank', 'away_rank', 'predicted_winner', 'predicted_home_score',
                    'predicted_away_score', 'predicted_margin', 'win_probability', 'confidence', 'vegas_spread',
@@ -239,36 +267,30 @@ def update_prediction_outcomes(outcomes_table='workspace.default.prediction_outc
                 p.confidence,
                 p.vegas_spread,
                 p.cover_pick,
-                r.home_score AS actual_home_score,
-                r.away_score AS actual_away_score,
-                (r.home_score - r.away_score) AS actual_margin,
-                CASE WHEN r.home_score > r.away_score THEN p.home_team ELSE p.away_team END AS actual_winner,
+                p.res_home AS actual_home_score,
+                p.res_away AS actual_away_score,
+                (p.res_home - p.res_away) AS actual_margin,
+                CASE WHEN p.res_home > p.res_away THEN p.home_team ELSE p.away_team END AS actual_winner,
                 CASE WHEN p.predicted_winner =
-                     CASE WHEN r.home_score > r.away_score THEN p.home_team ELSE p.away_team END
+                     CASE WHEN p.res_home > p.res_away THEN p.home_team ELSE p.away_team END
                      THEN 1 ELSE 0 END AS su_correct,
                 CASE
                     WHEN p.vegas_spread IS NULL THEN NULL  -- no line; 0 = pick 'em is graded
-                    WHEN (r.home_score - r.away_score + p.vegas_spread) = 0 THEN NULL  -- push (bet refunded)
+                    WHEN (p.res_home - p.res_away + p.vegas_spread) = 0 THEN NULL  -- push (bet refunded)
                     WHEN (p.predicted_home_score - p.predicted_away_score + p.vegas_spread) > 0
-                         AND (r.home_score - r.away_score + p.vegas_spread) > 0 THEN 1
+                         AND (p.res_home - p.res_away + p.vegas_spread) > 0 THEN 1
                     WHEN (p.predicted_home_score - p.predicted_away_score + p.vegas_spread) <= 0
-                         AND (r.home_score - r.away_score + p.vegas_spread) < 0 THEN 1
+                         AND (p.res_home - p.res_away + p.vegas_spread) < 0 THEN 1
                     ELSE 0
                 END AS ats_correct,
-                ((p.predicted_home_score - p.predicted_away_score) - (r.home_score - r.away_score)) AS margin_error,
+                ((p.predicted_home_score - p.predicted_away_score) - (p.res_home - p.res_away)) AS margin_error,
                 current_timestamp() AS recorded_at,
                 {bet_select}
-            FROM {history_table} p
-            INNER JOIN {results_table} r
-                ON p.home_team = r.home_team
-                AND p.away_team = r.away_team
-                AND ABS(DATEDIFF(p.game_date, r.game_date)) <= 1
-            WHERE NOT EXISTS (
-                SELECT 1 FROM {outcomes_table} o
-                WHERE o.home_team = p.home_team
-                  AND o.away_team = p.away_team
-                  AND o.game_date = p.game_date
-            )
+            FROM {matched_results_sql(history_table, results_table, where=f'''
+                AND NOT EXISTS (SELECT 1 FROM {outcomes_table} o
+                                WHERE o.home_team = p.home_team AND o.away_team = p.away_team
+                                  AND o.game_date = p.game_date)''')} p
+            WHERE p.rn = 1
         """)
 
         cursor.execute(f"SELECT COUNT(*) FROM {outcomes_table}")
@@ -281,8 +303,13 @@ def update_prediction_outcomes(outcomes_table='workspace.default.prediction_outc
         print(f"❌ Error updating prediction outcomes: {e}")
 
 
-def update_ml_ats_results():
-    """Fill in actual scores and ATS result for completed games in ml_predictions."""
+def update_ml_ats_results(ml_table='workspace.default.ml_predictions',
+                          results_table='workspace.default.game_results'):
+    """
+    Fill in actual scores and ATS result for completed games in ml_predictions (v2/v3 graded separately).
+    Results are matched like the Formula's (matched_results_sql): either home/away order, within a day.
+    Table names are parameters so tests can run against scratch copies.
+    """
     print("\nUpdating ML ATS results...")
     try:
         connection = sql.connect(
@@ -293,17 +320,13 @@ def update_ml_ats_results():
         )
         cursor = connection.cursor()
 
-        cursor.execute("""
-            SELECT m.game_date, m.home_team, m.away_team,
-                   m.ml_predicted_margin, m.vegas_spread,
-                   r.home_score, r.away_score, COALESCE(m.model_family, 'v1') AS family
-            FROM workspace.default.ml_predictions m
-            JOIN workspace.default.game_results r
-                ON m.home_team = r.home_team
-               AND m.away_team = r.away_team
-               AND m.game_date = r.game_date
-            WHERE m.actual_home_score IS NULL
-              AND r.home_score IS NOT NULL
+        cursor.execute(f"""
+            SELECT p.game_date, p.home_team, p.away_team,
+                   p.ml_predicted_margin, p.vegas_spread,
+                   p.res_home, p.res_away, COALESCE(p.model_family, 'v1') AS family
+            FROM {matched_results_sql(ml_table, results_table, partition_extra=", COALESCE(p.model_family, 'v1')",
+                                      where='AND p.actual_home_score IS NULL')} p
+            WHERE p.rn = 1
         """)
         rows = cursor.fetchall()
 
@@ -327,7 +350,7 @@ def update_ml_ats_results():
             ats_val  = str(ats_correct) if ats_correct is not None else 'NULL'
 
             cursor.execute(f"""
-                UPDATE workspace.default.ml_predictions
+                UPDATE {ml_table}
                 SET actual_home_score = {actual_home},
                     actual_away_score = {actual_away},
                     ml_ats_correct = {ats_val}
