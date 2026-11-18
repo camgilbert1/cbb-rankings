@@ -101,6 +101,9 @@ jobs:
     needs: update-data
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
+    concurrency:              # shared with deploy-site.yml: one Pages deploy at a time
+      group: pages
+      cancel-in-progress: false
     permissions:
       pages: write
       id-token: write

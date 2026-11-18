@@ -175,6 +175,35 @@ tr.link { cursor: pointer; }
 .team-row.bet-side .tname { color: var(--violet); }
 .v3line { display: flex; justify-content: space-between; gap: 10px; padding: 9px 14px 11px; border-top: 1px solid var(--line); font-size: 13px; }
 .seg { display: inline-flex; gap: 6px; }
+/* Today's plays (collapsible) */
+.plays { background: var(--panel); border: 1px solid var(--violet-line); border-radius: var(--radius); margin-bottom: 16px; overflow: hidden; }
+.plays summary { display: flex; align-items: center; gap: 10px; padding: 12px 16px; cursor: pointer; list-style: none; background: linear-gradient(180deg, var(--violet-bg), transparent); }
+.plays summary::-webkit-details-marker, .tracker summary::-webkit-details-marker { display: none; }
+.plays-title { font-weight: 800; color: var(--violet); letter-spacing: .02em; }
+.caret { margin-left: auto; color: var(--muted); transition: transform .15s; display: inline-block; }
+details[open] > summary .caret { transform: rotate(180deg); }
+.play-list { display: grid; border-top: 1px solid var(--line); }
+.play-row { display: grid; grid-template-columns: 74px 40px minmax(0, 1fr) auto 40px; gap: 10px; align-items: center; padding: 9px 16px;
+  background: none; border: 0; border-bottom: 1px solid var(--line); color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.play-row:last-child { border-bottom: 0; }
+.play-row:hover { background: var(--panel-2); }
+.pr-time { color: var(--muted); font-size: 12px; }
+.pr-pick { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pr-game { font-size: 12px; white-space: nowrap; }
+.pr-prob { text-align: right; color: var(--violet); font-weight: 700; }
+.tag.mk-ats { background: var(--violet-bg); color: var(--violet); margin-left: 0; text-align: center; }
+.tag.mk-ou { background: var(--blue-bg); color: var(--blue); margin-left: 0; text-align: center; }
+.card.flash { animation: flash 1.2s ease-out; }
+@keyframes flash { 0% { box-shadow: 0 0 0 3px var(--violet); } 100% { box-shadow: 0 0 0 0 transparent; } }
+/* Season record boxes that open to the last 5 graded picks */
+.tracker summary { list-style: none; cursor: pointer; }
+.tracker .k { display: flex; align-items: center; }
+.tracker .recent { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line); display: grid; gap: 6px; }
+.recent-row { display: grid; grid-template-columns: 30px minmax(0, 1fr); column-gap: 8px; align-items: center; }
+.recent-row .rr-pick { font-weight: 700; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.recent-row .small { grid-column: 2; }
+@media (max-width: 720px) { .play-row { grid-template-columns: 62px 36px minmax(0, 1fr) 36px; } .pr-game { display: none; } }
+@media (prefers-reduced-motion: reduce) { .card.flash { animation: none; } .caret { transition: none; } }
 .result-list { display: grid; gap: 8px; margin-bottom: 16px; }
 .result-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--line-2); border-radius: 10px; padding: 10px 14px; }
 .result-row.W { border-left-color: var(--green); }

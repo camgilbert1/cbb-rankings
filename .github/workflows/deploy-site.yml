@@ -1,0 +1,69 @@
+name: Deploy Site
+
+# Rebuilds the site data from Databricks and publishes site/ to GitHub Pages. Runs automatically when
+# website code changes, so site edits go live in a few minutes without the full daily pipeline:
+# no KenPom refresh, no predictions, no model training, no Odds API credits.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - 'BuildSite.py'
+  workflow_dispatch:
+
+# One Pages deploy at a time (shared with the daily workflow's deploy); never cancel one mid-way
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build-site:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install kenpompy requests databricks-sql-connector pandas pyarrow python-dotenv pytz beautifulsoup4 cloudscraper xgboost scikit-learn scipy numpy
+
+      # Read-only use of the daily workflow's box-score cache (box ratings for the Ratings page)
+      - name: Restore box-score cache
+        uses: actions/cache/restore@v4
+        with:
+          path: box_cache
+          key: box-cache-${{ github.run_id }}
+          restore-keys: box-cache-
+
+      - name: Build website data
+        timeout-minutes: 15
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_HTTP_PATH: ${{ secrets.DATABRICKS_HTTP_PATH }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+        run: python BuildSite.py
+
+      - name: Upload website
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy-site:
+    needs: build-site
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4

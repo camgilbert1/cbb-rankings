@@ -112,6 +112,11 @@ const recStr = s => `${s.w}-${s.l}${s.p ? '-' + s.p : ''}`;
 const resChip = r => r ? `<span class="res ${r}">${r === 'P' ? 'PUSH' : r}</span>` : '<span class="res pend">PENDING</span>';
 const retroTag = b => b && b.retro ? '<span class="tag retro" title="Bet applied after the fact to the stored pre-game prediction and line">RETRO</span>' : '';
 const unitsStr = u => `${u > 0 ? '+' : ''}${u.toFixed(2)}u`;
+const cardId = g => `card-${g.date}-${g.home.id || T_(g.home.name)}-${g.away.id || T_(g.away.name)}`;
+const T_ = s => String(s || '').replace(/[^A-Za-z0-9]/g, '');
+// Per-viewer UI memory (e.g. whether Today's plays is open); storage can be blocked, so never required
+const lsGet = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* ignore */ } };
 /* ATS | O/U toggle; `ui` holds the page's chosen market in ui.mk */
 const marketToggle = (ui, attr = 'data-mk') => `<div class="seg">${Object.entries(MARKETS).map(([k, m]) =>
   `<button class="chip ${(ui.mk || 'ats') === k ? 'on' : ''}" ${attr}="${k}">${m.label}</button>`).join('')}</div>`;
@@ -192,7 +197,7 @@ function gameCard(g, showDate = false) {
     blend = `<div class="blendbar">Box-score model <b class="num">${sgn(v3.box)}</b> · KenPom model <b class="num">${sgn(v3.kp)}</b> · ${share}% box
       <div class="bar"><span style="width:${share}%"></span></div></div>`;
   }
-  return `<div class="card${bet || ouBet ? ' official' : ''}"><div class="card-top">${top}</div>${banner}
+  return `<div class="card${bet || ouBet ? ' official' : ''}" id="${cardId(g)}"><div class="card-top">${top}</div>${banner}
     <div class="teams">${colsHead}${row(g.away, false)}${row(g.home, true)}</div>${detail}${blend}</div>`;
 }
 
@@ -213,17 +218,39 @@ function renderPicks() {
   gs = [...gs].sort(q ? (a, b) => b.date.localeCompare(a.date) || (a.time || '').localeCompare(b.time || '')
                       : (a, b) => (a.time || '').localeCompare(b.time || ''));
   const season = betStats(OFFICIAL, S.games), seasonOu = betStats(OFFICIAL, S.games, 'ou');
-  const tracker = (label, s) => `<div class="stat"><div class="k">${label} record</div><div class="v num">${recStr(s)}</div>
-      <div class="d">${s.pct === null ? (s.bets ? s.bets + ' pending' : 'no graded picks yet') : `${fmt(s.pct)}% · <span class="${s.units >= 0 ? 'pos' : 'neg'}">${unitsStr(s.units)}</span> · ${s.bets} bets`}</div></div>`;
+  // Season record boxes open to show the last 5 graded official picks of that market (#25)
+  const recent = mk => {
+    const done = S.games.filter(g => betOf(g, OFFICIAL, mk) && betResult(g, OFFICIAL, mk))
+      .sort((a, b) => b.date.localeCompare(a.date) || (b.time || '').localeCompare(a.time || '')).slice(0, 5);
+    if (!done.length) return '<div class="mut small">No graded picks yet.</div>';
+    return done.map(g => { const b = betOf(g, OFFICIAL, mk), r = betResult(g, OFFICIAL, mk);
+      return `<div class="recent-row"><span class="res ${r}">${r === 'P' ? 'P' : r}</span><span class="rr-pick">${esc(b.label)}</span>
+        <span class="mut small num">${niceDate(g.date, { month: 'short', day: 'numeric' })} · ${g.final.away}-${g.final.home}</span></div>`; }).join('');
+  };
+  const tracker = (label, s, mk) => `<details class="stat tracker"><summary><div class="k">${label} record <span class="caret">▾</span></div><div class="v num">${recStr(s)}</div>
+      <div class="d">${s.pct === null ? (s.bets ? s.bets + ' pending' : 'no graded picks yet') : `${fmt(s.pct)}% · <span class="${s.units >= 0 ? 'pos' : 'neg'}">${unitsStr(s.units)}</span> · ${s.bets} bets`}</div></summary>
+      <div class="recent"><div class="mut small">Last 5 graded</div>${recent(mk)}</div></details>`;
+  // Today's plays (#26): every official pick for the selected day, collapsible; tap one to jump to its game
+  const plays = [...picks].sort((a, b) => (a.time || '').localeCompare(b.time || ''))
+    .flatMap(g => ['ats', 'ou'].map(mk => ({ g, mk, b: betOf(g, OFFICIAL, mk) })).filter(x => x.b));
+  const playsOpen = lsGet('cbb.playsOpen') !== '0';
+  const playsBar = plays.length ? `<details class="plays" id="plays" ${playsOpen ? 'open' : ''}>
+      <summary><span class="plays-title">${ui.date === S.meta.today ? "Today's plays" : 'Plays'}</span>
+        <span class="mut num">${plays.length} · ${nAts} ATS · ${nOu} O/U</span><span class="caret">▾</span></summary>
+      <div class="play-list">${plays.map(({ g, mk, b }) => `<button class="play-row" data-card="${cardId(g)}">
+        <span class="pr-time num">${esc(etTime(g.time))}</span><span class="tag mk-${mk}">${MARKETS[mk].label}</span>
+        <span class="pr-pick">${esc(b.label)}</span><span class="pr-game mut">${esc(shortName(g.away))} ${g.neutral ? 'vs' : '@'} ${esc(shortName(g.home))}</span>
+        <span class="pr-prob num">${fmt(b.prob * 100, 0)}%</span></button>`).join('')}</div></details>` : '';
   $app.innerHTML = `
     <div class="page-head"><div><h1>${ui.date === S.meta.today ? "Tonight's Games" : 'Games'}</h1>
       <div class="sub">${niceDate(ui.date, { weekday: 'long', month: 'long', day: 'numeric' })} · ${day.length} games · official picks are v3 bets at ${fmt((S.meta.bet_threshold || .6) * 100, 0)}%+ to cover</div></div>
       <select class="select" id="date">${dates.map(d => `<option value="${d}" ${d === ui.date ? 'selected' : ''}>${niceDate(d)}</option>`).join('')}</select></div>
     ${v3Ran ? '' : `<div class="notice">v3 picks unavailable for this day${S.meta.box_through ? ` (box-score data through ${esc(niceDate(S.meta.box_through))})` : ''}.</div>`}
+    ${playsBar}
     <div class="strip">
       <div class="stat accent"><div class="k">Official picks</div><div class="v num">${nAts + nOu}</div><div class="d">${nAts} ATS · ${nOu} O/U</div></div>
-      ${tracker('ATS', season)}
-      ${tracker('O/U', seasonOu)}
+      ${tracker('ATS', season, 'ats')}
+      ${tracker('O/U', seasonOu, 'ou')}
     </div>
     <div class="controls">
       <button class="chip ${ui.filter === 'all' ? 'on' : ''}" data-f="all">All games <span class="mut">${day.length}</span></button>
@@ -238,6 +265,15 @@ function renderPicks() {
   const gq = document.getElementById('gq');
   gq.oninput = e => { ui.q = e.target.value; const pos = e.target.selectionStart; renderPicks();
     const n = document.getElementById('gq'); n.focus(); n.setSelectionRange(pos, pos); };
+  const pl = document.getElementById('plays');
+  if (pl) pl.ontoggle = () => lsSet('cbb.playsOpen', pl.open ? '1' : '0');
+  document.querySelectorAll('.play-row').forEach(b => b.onclick = () => {
+    let card = document.getElementById(b.dataset.card);
+    if (!card && (ui.q || ui.filter === 'picks')) { ui.q = ''; ui.filter = 'all'; renderPicks(); card = document.getElementById(b.dataset.card); }
+    if (!card) return;
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    card.classList.remove('flash'); void card.offsetWidth; card.classList.add('flash');
+  });
 }
 
 /* ================= MODELS (analysis of every model's bets) ================= */
