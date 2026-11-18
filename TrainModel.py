@@ -492,9 +492,12 @@ def fetch_todays_games():
         url = "https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard"
         resp = requests.get(url, params={'dates': today, 'limit': 300, 'groups': 50}, timeout=15)
         resp.raise_for_status()
-        games = []
+        games, locked = [], 0
         for event in resp.json().get('events', []):
-            if event['status']['type']['state'] == 'post':
+            # Lock: only games that haven't tipped off are (re)predicted. Started and finished
+            # games keep the pick made before tip-off (same rule as GamePredictions.py).
+            if event['status']['type']['state'] != 'pre':
+                locked += 1
                 continue
             competition = event['competitions'][0]
             home = away = home_id = away_id = None
@@ -508,6 +511,8 @@ def fetch_todays_games():
                               'home_id': home_id, 'away_id': away_id,   # ESPN ids (= box-score team_id)
                               'neutral_site': bool(competition.get('neutralSite', False))})
         print(f"  {len(games)} upcoming games")
+        if locked:
+            print(f"  🔒 {locked} games already started or finished — keeping their v2/v3 picks")
         return games
     except Exception as e:
         print(f"  Error fetching games: {e}")
@@ -658,7 +663,15 @@ def run_v3(models, df_v2, games_today, ratings_df, state, spreads):
         return []
 
 
-def upload_predictions(records, family=MODEL_FAMILY):
+PREDICTIONS_TABLE = 'workspace.default.ml_predictions'
+
+
+def upload_predictions(records, family=MODEL_FAMILY, table=PREDICTIONS_TABLE):
+    """
+    Upsert (MERGE) this model's predictions: a game already stored for this date + family is
+    updated in place, a new game is inserted, and every other row (e.g. games that have already
+    started, which fetch_todays_games leaves out) is untouched.
+    """
     if not records:
         print(f"  No {family} predictions to upload")
         return
@@ -667,8 +680,8 @@ def upload_predictions(records, family=MODEL_FAMILY):
     try:
         conn = db_connect()
         cursor = conn.cursor()
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS workspace.default.ml_predictions (
+        cursor.execute(f"""
+            CREATE TABLE IF NOT EXISTS {table} (
                 game_date DATE, home_team STRING, away_team STRING,
                 ml_predicted_home_score DOUBLE, ml_predicted_away_score DOUBLE,
                 ml_predicted_margin DOUBLE, ml_predicted_total DOUBLE,
@@ -685,40 +698,82 @@ def upload_predictions(records, family=MODEL_FAMILY):
             "box_margin DOUBLE", "kp_margin DOUBLE", "box_share DOUBLE",
         ]:
             try:
-                cursor.execute(f"ALTER TABLE workspace.default.ml_predictions ADD COLUMNS ({col_def})")
+                cursor.execute(f"ALTER TABLE {table} ADD COLUMNS ({col_def})")
             except Exception:
                 pass
 
-        # Replace only this model's rows for the date (v2 and v3 are stored side by side)
-        cursor.execute(f"""DELETE FROM workspace.default.ml_predictions
-                           WHERE game_date = '{game_date}' AND COALESCE(model_family, 'v1') = '{family}'""")
+        # One source row per game (v2 and v3 are stored side by side, matched by family).
+        # Team names are compared with apostrophes stripped: stored names have lost them
+        # (see name_key), and the same escaping is used here so new rows match old ones.
         num = lambda v: 'NULL' if v is None else v
+        rows, seen = [], set()
         for rec in records:
+            key = (rec['game_date'], name_key(rec['home_team']), name_key(rec['away_team']))
+            if key in seen:
+                continue
+            seen.add(key)
             he = rec['home_team'].replace("'", "''")
             ae = rec['away_team'].replace("'", "''")
-            cursor.execute(f"""
-                INSERT INTO workspace.default.ml_predictions
-                    (game_date, home_team, away_team,
-                     ml_predicted_home_score, ml_predicted_away_score,
-                     ml_predicted_margin, ml_predicted_total,
-                     ml_win_probability, model_version, generated_at,
-                     vegas_spread, ats_confidence,
-                     actual_home_score, actual_away_score, ml_ats_correct, model_family,
-                     box_margin, kp_margin, box_share)
-                VALUES (
-                    '{rec['game_date']}', '{he}', '{ae}',
-                    {rec['ml_predicted_home_score']}, {rec['ml_predicted_away_score']},
-                    {rec['ml_predicted_margin']}, {rec['ml_predicted_total']},
-                    {rec['ml_win_probability']}, '{rec['model_version']}',
-                    current_timestamp(),
-                    {num(rec['vegas_spread'])}, '{rec['ats_confidence']}',
-                    NULL, NULL, NULL, '{family}',
-                    {num(rec.get('box_margin'))}, {num(rec.get('kp_margin'))}, {num(rec.get('box_share'))}
-                )
-            """)
+            rows.append(f"""(
+                '{rec['game_date']}', '{he}', '{ae}',
+                {rec['ml_predicted_home_score']}, {rec['ml_predicted_away_score']},
+                {rec['ml_predicted_margin']}, {rec['ml_predicted_total']},
+                {rec['ml_win_probability']}, '{rec['model_version']}',
+                {num(rec['vegas_spread'])}, '{rec['ats_confidence']}', '{family}',
+                {num(rec.get('box_margin'))}, {num(rec.get('kp_margin'))}, {num(rec.get('box_share'))})""")
+        value_cols = ('game_date, home_team, away_team, ml_predicted_home_score, ml_predicted_away_score, '
+                      'ml_predicted_margin, ml_predicted_total, ml_win_probability, model_version, '
+                      'vegas_spread, ats_confidence, model_family, box_margin, kp_margin, box_share')
+        cursor.execute(f"""
+            MERGE INTO {table} AS t
+            USING (
+                SELECT CAST(game_date AS DATE) AS game_date, home_team, away_team,
+                       CAST(ml_predicted_home_score AS DOUBLE) AS ml_predicted_home_score,
+                       CAST(ml_predicted_away_score AS DOUBLE) AS ml_predicted_away_score,
+                       CAST(ml_predicted_margin AS DOUBLE) AS ml_predicted_margin,
+                       CAST(ml_predicted_total AS DOUBLE) AS ml_predicted_total,
+                       CAST(ml_win_probability AS DOUBLE) AS ml_win_probability,
+                       model_version, CAST(vegas_spread AS DOUBLE) AS vegas_spread,
+                       ats_confidence, model_family,
+                       CAST(box_margin AS DOUBLE) AS box_margin, CAST(kp_margin AS DOUBLE) AS kp_margin,
+                       CAST(box_share AS DOUBLE) AS box_share
+                FROM VALUES {', '.join(rows)} AS v({value_cols})
+            ) AS s
+            ON  t.game_date = s.game_date
+            AND REPLACE(t.home_team, CHR(39), '') = REPLACE(s.home_team, CHR(39), '')
+            AND REPLACE(t.away_team, CHR(39), '') = REPLACE(s.away_team, CHR(39), '')
+            AND COALESCE(t.model_family, 'v1') = s.model_family
+            WHEN MATCHED THEN UPDATE SET
+                ml_predicted_home_score = s.ml_predicted_home_score,
+                ml_predicted_away_score = s.ml_predicted_away_score,
+                ml_predicted_margin = s.ml_predicted_margin,
+                ml_predicted_total = s.ml_predicted_total,
+                ml_win_probability = s.ml_win_probability,
+                model_version = s.model_version,
+                generated_at = current_timestamp(),
+                vegas_spread = s.vegas_spread,
+                ats_confidence = s.ats_confidence,
+                box_margin = s.box_margin, kp_margin = s.kp_margin, box_share = s.box_share
+            WHEN NOT MATCHED THEN INSERT
+                (game_date, home_team, away_team,
+                 ml_predicted_home_score, ml_predicted_away_score,
+                 ml_predicted_margin, ml_predicted_total,
+                 ml_win_probability, model_version, generated_at,
+                 vegas_spread, ats_confidence,
+                 actual_home_score, actual_away_score, ml_ats_correct, model_family,
+                 box_margin, kp_margin, box_share)
+            VALUES
+                (s.game_date, s.home_team, s.away_team,
+                 s.ml_predicted_home_score, s.ml_predicted_away_score,
+                 s.ml_predicted_margin, s.ml_predicted_total,
+                 s.ml_win_probability, s.model_version, current_timestamp(),
+                 s.vegas_spread, s.ats_confidence,
+                 NULL, NULL, NULL, s.model_family,
+                 s.box_margin, s.kp_margin, s.box_share)
+        """)
         cursor.close()
         conn.close()
-        print(f"  Uploaded {len(records)} predictions")
+        print(f"  Uploaded {len(rows)} predictions (updated or added; started games untouched)")
     except Exception as e:
         print(f"  Error uploading predictions: {e}")
 
