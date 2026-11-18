@@ -44,8 +44,18 @@ def consensus_line(lines):
 
 
 def get_vegas_spreads(game_date=None):
+    """Spreads only (see get_vegas_lines)."""
+    return get_vegas_lines(game_date)[0]
+
+
+def get_vegas_lines(game_date=None):
     """
-    Fetch Vegas spreads from The Odds API for games tipping off on game_date.
+    Fetch Vegas spreads and over/under totals from The Odds API for games tipping off on game_date.
+    One call; 'spreads,totals' costs 2 credits (1 per market).
+    Returns (spreads, totals): team name -> that team's spread, and team name -> the game's O/U line
+    (both teams map to the same total), each the consensus across bookmakers.
+
+    Spreads detail:
 
     The feed covers several days of games. Only games tipping off between 4:00 AM ET on game_date
     and 3:59 AM ET the next morning are kept, so a team's next game can't overwrite today's line. Each game's line is the
@@ -59,7 +69,7 @@ def get_vegas_spreads(game_date=None):
     """
     if not ODDS_API_KEY:
         print("⚠️  No Odds API key found, spreads will not be available")
-        return {}
+        return {}, {}
 
     eastern = pytz.timezone('US/Eastern')
     if game_date is None:
@@ -70,7 +80,7 @@ def get_vegas_spreads(game_date=None):
         params = {
             'apiKey': ODDS_API_KEY,
             'regions': 'us',
-            'markets': 'spreads',
+            'markets': 'spreads,totals',
             'oddsFormat': 'american'
         }
 
@@ -84,7 +94,7 @@ def get_vegas_spreads(game_date=None):
         data = response.json()
 
         # Build mapping of team names to spreads (today's games only)
-        spreads = {}
+        spreads, totals = {}, {}
         other_days = 0
         for game in data:
             tip = datetime.fromisoformat(game['commence_time'].replace('Z', '+00:00')).astimezone(eastern)
@@ -95,6 +105,21 @@ def get_vegas_spreads(game_date=None):
                 continue
             home_team = game['home_team']
             away_team = game['away_team']
+
+            # Over/under total from every bookmaker that posts one (the Over and Under share the point)
+            ou = []
+            for bookmaker in game.get('bookmakers', []):
+                for market in bookmaker.get('markets', []):
+                    if market['key'] != 'totals':
+                        continue
+                    point = next((o.get('point') for o in market['outcomes'] if o['name'] == 'Over'), None)
+                    if point is not None:
+                        ou.append(float(point))
+            if ou and home_team not in totals and away_team not in totals:
+                total = consensus_line(ou)
+                totals[home_team] = totals[away_team] = total
+                ou_detail = ', '.join(f"{v:g} ×{c}" for v, c in Counter(ou).most_common())
+                print(f"  {away_team} @ {home_team}: O/U {total:g} ({len(ou)} books: {ou_detail})")
 
             # Home spread from every bookmaker that posts one
             lines = []
@@ -117,14 +142,14 @@ def get_vegas_spreads(game_date=None):
             spread_detail = ', '.join(f"{v:+g} ×{c}" for v, c in Counter(lines).most_common())
             print(f"  {away_team} @ {home_team}: {home_team} {line:+.1f} ({len(lines)} books: {spread_detail})")
 
-        print(f"✓ Fetched spreads for {len(spreads) // 2} games on {game_date} "
+        print(f"✓ Fetched spreads for {len(spreads) // 2} games and O/U totals for {len(totals) // 2} games on {game_date} "
               f"({other_days} games on other days ignored)")
-        print(f"  Odds API teams: {sorted(spreads.keys())}")
-        return spreads
+        print(f"  Odds API teams: {sorted(set(spreads) | set(totals))}")
+        return spreads, totals
 
     except Exception as e:
-        print(f"⚠️  Error fetching spreads: {e}")
-        return {}
+        print(f"⚠️  Error fetching lines: {e}")
+        return {}, {}
 
 
 
@@ -443,7 +468,7 @@ PREDICTION_HISTORY_TABLE = 'workspace.default.prediction_history'
 HISTORY_COLUMNS = ['game_date', 'game_time', 'home_team', 'away_team', 'predicted_winner', 'win_probability',
                    'predicted_home_score', 'predicted_away_score', 'confidence', 'vegas_spread', 'cover_pick',
                    'cover_confidence', 'prediction_date', 'home_adj_em', 'away_adj_em', 'home_oe', 'away_oe',
-                   'home_de', 'away_de', 'home_rank', 'away_rank'] + [c for c, _ in Betting.BET_COLUMNS]
+                   'home_de', 'away_de', 'home_rank', 'away_rank'] + [c for c, _ in Betting.BET_COLUMNS] + ['vegas_total']
 
 
 def upload_predictions_to_databricks(predictions_df, table=PREDICTION_HISTORY_TABLE):
@@ -519,6 +544,10 @@ def upload_predictions_to_databricks(predictions_df, table=PREDICTION_HISTORY_TA
         # Delete ONLY predictions for games we're about to regenerate
         # This preserves predictions for games that have already started (lock mechanism)
         Betting.ensure_bet_columns(cursor, table)
+        try:
+            cursor.execute(f"ALTER TABLE {table} ADD COLUMNS (vegas_total DOUBLE)")   # over/under line
+        except Exception:
+            pass  # already exists
 
         print("  Removing old predictions for unstarted games...")
         deleted_count = 0
@@ -568,7 +597,8 @@ def upload_predictions_to_databricks(predictions_df, table=PREDICTION_HISTORY_TA
                     {row['away_de']},
                     {row['home_rank']},
                     {row['away_rank']},
-                    {bet_sql}
+                    {bet_sql},
+                    {Betting.sql_value(row.get('vegas_total'))}
                 )
             """)
 
@@ -620,8 +650,8 @@ def main(date=None):
     print(f"\n🔓 GENERATING NEW PREDICTIONS: {len(unstarted_games)} games not yet started")
 
     # Get Vegas spreads
-    vegas_spreads = get_vegas_spreads(date)   # date None = today (Eastern)
-    unmapped_odds_teams(vegas_spreads)        # warns about Odds API names missing from d1_teams.ODDS_NAMES
+    vegas_spreads, vegas_totals = get_vegas_lines(date)   # date None = today (Eastern)
+    unmapped_odds_teams({**vegas_totals, **vegas_spreads})  # warns about Odds API names missing from d1_teams.ODDS_NAMES
 
     # Get team statistics
     team_stats = get_team_stats_from_databricks()
@@ -672,6 +702,10 @@ def main(date=None):
         away_team_normalized = odds_name_for(away_team, vegas_spreads)
         home_spread = vegas_spreads.get(home_team_normalized)
         away_spread = vegas_spreads.get(away_team_normalized)
+        # Over/under total (same for both teams); None = no total posted
+        vegas_total = vegas_totals.get(home_team_normalized)
+        if vegas_total is None:
+            vegas_total = vegas_totals.get(away_team_normalized)
 
         if home_spread is None and vegas_spreads:
             print(f"  ⚠️  No spread found for: '{home_team}' (tried: '{home_team_normalized}')")
@@ -735,6 +769,8 @@ def main(date=None):
                 spread_text = f"{home_team} {home_spread:+.1f}" if home_spread < 0 else f"{away_team} {-home_spread:+.1f}"
             print(f"Vegas Spread: {spread_text}")
             print(f"Cover Pick: {cover_pick} (Confidence: {cover_confidence})")
+        if vegas_total is not None:
+            print(f"Vegas O/U: {vegas_total:g}  (predicted total {prediction['predicted_home_score'] + prediction['predicted_away_score']:.1f})")
         if bet:
             print(f"BET: {bet['label']}  ({bet['prob']:.0%} to cover, edge {bet['edge']:.1f}, {Betting.BET_UNITS:g}u)")
         print(f"Confidence Level: {prediction['confidence']}")
@@ -776,6 +812,7 @@ def main(date=None):
             'home_rank': features['home_rank'] if features else 0,
             'away_rank': features['away_rank'] if features else 0,
             **Betting.bet_fields(bet),
+            'vegas_total': vegas_total,  # over/under line; None = not posted
         })
 
     # Convert to DataFrame
