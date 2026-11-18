@@ -304,6 +304,23 @@ def main():
             json.dump(obj, fh, separators=(',', ':'), default=clean)
     print(f"  wrote {len(teams)} teams, {len(games)} games "
           f"({sum(1 for g in games if g['date'] == today)} today) to {OUT}")
+    if os.getenv('GITHUB_ACTIONS'):
+        bust_cache(now.strftime('%Y%m%d%H%M%S'))
+
+
+def bust_cache(version):
+    """
+    GitHub Pages lets browsers keep files for 10 minutes, so a deploy's new app.js / styles.css could be
+    ignored on refresh. Tag them with this build's version in index.html (app.js?v=...) so every deploy
+    is fetched fresh. Runs only in GitHub Actions, so the repo's index.html is never changed locally.
+    """
+    import re
+    path = os.path.join(os.path.dirname(OUT), 'index.html')
+    html = open(path, encoding='utf-8').read()
+    html = re.sub(r'(href="styles\.css)(\?v=[^"]*)?"', rf'\1?v={version}"', html)
+    html = re.sub(r'(src="app\.js)(\?v=[^"]*)?"', rf'\1?v={version}"', html)
+    open(path, 'w', encoding='utf-8', newline='\n').write(html)
+    print(f"  cache-busted index.html assets (v={version})")
 
 
 if __name__ == '__main__':
