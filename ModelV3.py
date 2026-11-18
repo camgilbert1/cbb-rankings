@@ -86,6 +86,45 @@ def total_bias(model, df, current_season):
     return float(np.mean(model.predict(cur[BOX_TOTAL_FEATURES]) - cur['total'].values)), len(cur)
 
 
+# First-half predictions (1H tab, added Nov 18 2026). Honest tests (train 2 seasons, test 2025-26 / 2024-25):
+#   1H margin = v3 margin x measured 1H margin share (~0.535): RMSE 9.27 / 9.26 (a separate 1H model was worse)
+#   1H total  = average of (v3 total x 1H scoring share ~0.469) and a direct v3-style 1H total model:
+#               RMSE 10.30 / 9.91 (plain "half the full game" 11.00 / 10.59)
+# Shares are re-measured every run on all completed games with first-half scores (BackfillHalves.py).
+HALVES_TABLE = 'workspace.default.game_halves'
+
+
+def load_halves(cursor):
+    cursor.execute(f"SELECT game_date, home_team, away_team, home_h1, away_h1 FROM {HALVES_TABLE}")
+    h = pd.DataFrame(cursor.fetchall(), columns=['game_date', 'home_team', 'away_team', 'home_h1', 'away_h1'])
+    h['game_date'] = pd.to_datetime(h['game_date'])
+    return h
+
+
+def fit_h1(df, halves, weight_fn, xgb_params, total_features):
+    """df: v3 training frame (one row per D1 game). Returns the pieces predict_h1 needs."""
+    d = df.merge(halves, on=['game_date', 'home_team', 'away_team'], how='inner')
+    d['h1_margin'] = d['home_h1'] - d['away_h1']
+    d['h1_total'] = d['home_h1'] + d['away_h1']
+    w, _ = weight_fn(d)
+    return {
+        'margin_share': float(np.sum(d['h1_margin'] * d['margin']) / np.sum(d['margin'] ** 2)),
+        'total_share': float(d['h1_total'].sum() / d['total'].sum()),
+        'box_total': XGBRegressor(**xgb_params).fit(d[BOX_TOTAL_FEATURES], d['h1_total'], sample_weight=w),
+        'kp_total': XGBRegressor(**xgb_params).fit(d[total_features], d['h1_total'], sample_weight=w),
+        'total_features': total_features, 'n': len(d),
+    }
+
+
+def predict_h1(h1, X, v3_margin, v3_total):
+    """(1H home scores, 1H away scores) for rows X given v3's full-game margin and total."""
+    direct = (BOX_SHARE_DEFAULT * h1['box_total'].predict(X[BOX_TOTAL_FEATURES])
+              + (1 - BOX_SHARE_DEFAULT) * h1['kp_total'].predict(X[h1['total_features']]))
+    tot = 0.5 * (h1['total_share'] * np.asarray(v3_total, dtype=float) + direct)
+    mar = h1['margin_share'] * np.asarray(v3_margin, dtype=float)
+    return (tot + mar) / 2, (tot - mar) / 2
+
+
 def fit_box_model(df, weights, xgb_params):
     m = XGBRegressor(**xgb_params)
     m.fit(df[BOX_FEATURES], df['margin'], sample_weight=weights)

@@ -734,9 +734,22 @@ def run_v3(models, df_v2, games_today, ratings_df, state, spreads, bet_params=Be
         except Exception as e:
             box_tot, v3_tot = [None] * len(Xb), kp_tot
             print(f"::warning::v3 own total unavailable ({type(e).__name__}: {e}); using the KenPom total this run")
+        # First-half scores for the 1H tab (display only, no bets). Any failure leaves them blank this run.
+        h1_home = h1_away = [None] * len(Xb)
+        try:
+            conn = db_connect(); cur = conn.cursor()
+            halves = V3.load_halves(cur); cur.close(); conn.close()
+            h1 = V3.fit_h1(df, halves, compute_weights, XGBOOST_PARAMS, TOTAL_FEATURES)
+            h1_home, h1_away = V3.predict_h1(h1, Xb, blended, v3_tot)
+            print(f"  1H: margin x{h1['margin_share']:.3f}, scoring x{h1['total_share']:.3f} "
+                  f"(measured on {h1['n']} games with first-half scores)")
+        except Exception as e:
+            print(f"::warning::1H predictions unavailable ({type(e).__name__}: {e})")
         extras = [{'box_margin': round(float(b), 1), 'kp_margin': round(float(k), 1), 'box_share': round(float(s), 3),
-                   'box_total': None if bt is None else round(float(bt), 1), 'kp_total': round(float(kt), 1)}
-                  for b, k, s, bt, kt in zip(bx, kp, share, box_tot, kp_tot)]
+                   'box_total': None if bt is None else round(float(bt), 1), 'kp_total': round(float(kt), 1),
+                   'h1_home_score': None if hh is None else round(float(hh), 1),
+                   'h1_away_score': None if ha is None else round(float(ha), 1)}
+                  for b, k, s, bt, kt, hh, ha in zip(bx, kp, share, box_tot, kp_tot, h1_home, h1_away)]
         return build_records(Xb, blended, v3_tot, spreads,
                              f"v3_{datetime.now().strftime('%Y%m%d')}", extras, bet_params=bet_params,
                              totals=totals, ou_scatter=ou_scatter)
@@ -786,7 +799,7 @@ def upload_predictions(records, family=MODEL_FAMILY, table=PREDICTIONS_TABLE):
                 pass
         Betting.ensure_bet_columns(cursor, table)
         Betting.ensure_ou_columns(cursor, table)
-        for col_def in ("box_total DOUBLE", "kp_total DOUBLE"):
+        for col_def in ("box_total DOUBLE", "kp_total DOUBLE", "h1_home_score DOUBLE", "h1_away_score DOUBLE"):
             try:
                 cursor.execute(f"ALTER TABLE {table} ADD COLUMNS ({col_def})")
             except Exception:
@@ -798,7 +811,8 @@ def upload_predictions(records, family=MODEL_FAMILY, table=PREDICTIONS_TABLE):
         num = lambda v: 'NULL' if v is None else v
         # Spread bet columns, the O/U line and the O/U bet columns travel together through the MERGE
         extra_cols = Betting.BET_COLUMNS + [('vegas_total', 'DOUBLE')] + Betting.OU_COLUMNS \
-                     + [('box_total', 'DOUBLE'), ('kp_total', 'DOUBLE')]   # v3 total components (NULL for v2)
+                     + [('box_total', 'DOUBLE'), ('kp_total', 'DOUBLE')] \
+                     + [('h1_home_score', 'DOUBLE'), ('h1_away_score', 'DOUBLE')]   # v3 only (NULL for v2)
         bet_names = [c for c, _ in extra_cols]
         bet_casts = ', '.join(f"CAST({c} AS {kind}) AS {c}" for c, kind in extra_cols)
         rows, seen = [], set()

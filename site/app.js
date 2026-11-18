@@ -132,7 +132,7 @@ async function load() {
 }
 
 /* ---------------- router ---------------- */
-const routes = { picks: renderPicks, results: renderResults, models: renderModels, scorecard: renderModels,
+const routes = { picks: renderPicks, h1: renderH1, results: renderResults, models: renderModels, scorecard: renderModels,
                  ratings: renderRatings, team: renderTeam };
 function route() {
   const [, name = 'picks', arg] = (location.hash || '#/picks').split('/');
@@ -281,6 +281,59 @@ function renderPicks() {
     card.scrollIntoView({ behavior: 'smooth', block: 'center' });
     card.classList.remove('flash'); void card.offsetWidth; card.classList.add('flash');
   });
+}
+
+/* ================= 1H (v3 first-half predictions; display only, no bets) ================= */
+// 1H margin = v3 margin x measured first-half share; 1H total blends v3's total x first-half scoring share
+// with a direct first-half model (ModelV3.predict_h1). Pre-game view, like Games.
+function h1Card(g, showDate = false) {
+  const v3 = g[OFFICIAL];
+  const has = v3 && v3.h1_home !== null && v3.h1_home !== undefined;
+  const m = has ? v3.h1_home - v3.h1_away : null;              // home 1H margin
+  const top = `<span>${showDate ? esc(niceDate(g.date)) + ' · ' : ''}${esc(etTime(g.time))}
+               ${g.neutral ? '<span class="tag">NEUTRAL</span>' : ''}</span>
+               <span>${has ? '1H ' + esc(shortName(m >= 0 ? g.home : g.away)) + ' ' + fmtLine(-Math.round(Math.abs(m) * 2) / 2) : '1H —'}</span>`;
+  const row = (side, isHome) => {
+    const t = team(side.id);
+    const rk = t ? `<span class="rk">${t.kenpom.rank}</span>` : '';
+    const sp = has ? Math.round((isHome ? -m : m) * 2) / 2 : null;       // our 1H spread for this team
+    const pred = has ? fmt(isHome ? v3.h1_home : v3.h1_away, 0) : '—';
+    const href = t ? `href="#/team/${side.id}"` : '';
+    return `<div class="team-row">${logo(side)}
+      <div style="min-width:0"><a ${href} class="tname">${rk}${esc(shortName(side))}</a>
+      <div class="tmeta">${esc(side.record || (t && t.record) || '')}${t ? ' · ' + esc(t.conf) : ''}</div></div>
+      <div class="line num">${sp === null ? '' : sp === 0 ? 'PK' : fmtLine(sp)}</div><div class="pred num">${pred}</div></div>`;
+  };
+  const colsHead = `<div class="cols-head"><span></span><span></span><span>1H line</span><span>1H pred</span></div>`;
+  const detail = !has ? '<div class="v3line mut">No first-half prediction for this game</div>'
+    : `<div class="v3line totals"><span>1H total <b class="num" style="color:var(--violet)">${fmt(v3.h1_home + v3.h1_away, 1)}</b></span>
+       <span class="mut num">full game ${fmt(v3.home + v3.away, 0)} · ${esc(shortName(v3.margin >= 0 ? g.home : g.away))} by ${fmt(Math.abs(v3.margin))}</span></div>`;
+  return `<div class="card"><div class="card-top">${top}</div>
+    <div class="teams">${colsHead}${row(g.away, false)}${row(g.home, true)}</div>${detail}</div>`;
+}
+
+function renderH1() {
+  const dates = [...new Set(S.games.map(g => g.date))].sort().reverse();
+  const ui = S.ui.h1 = S.ui.h1 || { date: dates.includes(S.meta.today) ? S.meta.today : dates[0] };
+  const day = S.games.filter(g => g.date === ui.date);
+  const q = (ui.q || '').trim().toLowerCase();
+  const matches = g => [g.home, g.away].some(s => [s.name, s.short, shortName(s)].some(n => (n || '').toLowerCase().includes(q)));
+  const hasH1 = g => g[OFFICIAL] && g[OFFICIAL].h1_home !== null && g[OFFICIAL].h1_home !== undefined;
+  let gs = (q ? S.games.filter(matches) : day).filter(hasH1);
+  gs = [...gs].sort(q ? (a, b) => b.date.localeCompare(a.date) || (a.time || '').localeCompare(b.time || '')
+                      : (a, b) => (a.time || '').localeCompare(b.time || ''));
+  $app.innerHTML = `
+    <div class="page-head"><div><h1>First Half</h1>
+      <div class="sub">${niceDate(ui.date, { weekday: 'long', month: 'long', day: 'numeric' })} · v3 first-half predictions · no bets, for checking against the books</div></div>
+      <select class="select" id="date">${dates.map(d => `<option value="${d}" ${d === ui.date ? 'selected' : ''}>${niceDate(d)}</option>`).join('')}</select></div>
+    <div class="controls"><span class="spacer"></span>
+      <input class="search" id="gq" type="search" placeholder="Search teams…" value="${esc(ui.q || '')}" aria-label="Search teams"></div>
+    ${gs.length ? `<div class="cards">${gs.map(g => h1Card(g, !!q)).join('')}</div>`
+      : `<div class="empty">${q ? `No first-half predictions match “${esc(ui.q)}”.` : 'No first-half predictions for this day (they start Nov 18, 2026).'}</div>`}`;
+  document.getElementById('date').onchange = e => { ui.date = e.target.value; renderH1(); };
+  const gq = document.getElementById('gq');
+  gq.oninput = e => { ui.q = e.target.value; const pos = e.target.selectionStart; renderH1();
+    const n = document.getElementById('gq'); n.focus(); n.setSelectionRange(pos, pos); };
 }
 
 /* ================= MODELS (analysis of every model's bets) ================= */

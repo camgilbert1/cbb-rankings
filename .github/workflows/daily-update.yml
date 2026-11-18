@@ -46,6 +46,15 @@ jobs:
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
         run: python APIPull.py
 
+      - name: Collect first-half scores (last 3 days)
+        timeout-minutes: 5
+        continue-on-error: true
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_HTTP_PATH: ${{ secrets.DATABRICKS_HTTP_PATH }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+        run: python BackfillHalves.py --recent 3
+
       - name: Snapshot CBBD ratings (SRS, Elo, adjusted) - record only
         timeout-minutes: 5
         continue-on-error: true

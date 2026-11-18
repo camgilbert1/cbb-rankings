@@ -225,7 +225,8 @@ def build_games(t, key2id, id2name, neutral, finals, slates):
                              'ats': clean(r.ml_ats_correct), 'box': clean(r.box_margin), 'kp': clean(r.kp_margin),
                              'box_share': clean(r.box_share), 'bet': bet_of(r),
                              'ou': clean(getattr(r, 'ml_ou_correct', None)), 'ou_bet': ou_bet_of(r),
-                             'box_total': clean(getattr(r, 'box_total', None)), 'kp_total': clean(getattr(r, 'kp_total', None))}
+                             'box_total': clean(getattr(r, 'box_total', None)), 'kp_total': clean(getattr(r, 'kp_total', None)),
+                             'h1_home': clean(getattr(r, 'h1_home_score', None)), 'h1_away': clean(getattr(r, 'h1_away_score', None))}
         if g['total_line'] is None:
             g['total_line'] = clean(getattr(r, 'vegas_total', None))
         if g['spread'] is None:

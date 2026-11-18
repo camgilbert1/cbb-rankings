@@ -244,3 +244,9 @@ details[open] > summary .caret { transform: rotate(180deg); }
   .page-head h1 { font-size: 22px; }
   .search { min-width: 0; flex: 1; }
 }
+@media (max-width: 480px) {          /* five tabs on a phone: logo only, tabs scroll sideways if still too wide */
+  .brand span:not(.brand-ball) { display: none; }
+  .tabs { min-width: 0; flex: 1; overflow-x: auto; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tabs a { padding: 0 7px; white-space: nowrap; }
+}
