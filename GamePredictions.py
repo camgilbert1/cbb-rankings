@@ -8,7 +8,7 @@ import requests
 from databricks import sql
 import os
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timedelta
 from statistics import median
 from dotenv import load_dotenv
 import pytz
@@ -23,6 +23,7 @@ DATABRICKS_HOST = os.getenv("DATABRICKS_HOST")
 DATABRICKS_HTTP_PATH = os.getenv("DATABRICKS_HTTP_PATH")
 DATABRICKS_TOKEN = os.getenv("DATABRICKS_TOKEN")
 ODDS_API_KEY = os.getenv("ODDS_API_KEY")
+DAY_START_HOUR_ET = 4   # betting day boundary for Vegas lines (see get_vegas_spreads)
 
 from team_names import find_team_match, normalize_team_name_for_odds
 
@@ -44,8 +45,8 @@ def get_vegas_spreads(game_date=None):
     """
     Fetch Vegas spreads from The Odds API for games tipping off on game_date.
 
-    The feed covers several days of games. Only games whose tip-off falls on game_date (Eastern)
-    are kept, so a team's next game can't overwrite today's line. Each game's line is the
+    The feed covers several days of games. Only games tipping off between 4:00 AM ET on game_date
+    and 3:59 AM ET the next morning are kept, so a team's next game can't overwrite today's line. Each game's line is the
     consensus (most common) home spread across bookmakers.
 
     Args:
@@ -85,7 +86,9 @@ def get_vegas_spreads(game_date=None):
         other_days = 0
         for game in data:
             tip = datetime.fromisoformat(game['commence_time'].replace('Z', '+00:00')).astimezone(eastern)
-            if tip.strftime('%Y%m%d') != game_date:
+            # The betting day runs 4:00 AM ET to 3:59 AM ET the next morning, so a late tip
+            # (10:30 PM Mountain = 12:30 AM ET) counts toward the evening ESPN lists it on.
+            if (tip - timedelta(hours=DAY_START_HOUR_ET)).strftime('%Y%m%d') != game_date:
                 other_days += 1
                 continue
             home_team = game['home_team']
