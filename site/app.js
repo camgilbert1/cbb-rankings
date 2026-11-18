@@ -577,14 +577,16 @@ function renderResults() {
       <div class="stat"><div class="k">Season ${M.label} record</div><div class="v num">${recStr(season)}</div><div class="d">${season.pct === null ? 'no graded picks yet' : fmt(season.pct) + '% · break-even ' + S.meta.breakeven + '%'}</div></div>
       <div class="stat"><div class="k">Season ${M.label} units</div><div class="v num ${season.units >= 0 ? 'pos' : 'neg'}">${unitsStr(season.units)}</div><div class="d">${season.bets} picks · ${season.pending} pending</div></div>
     </div>
-    <div class="panel"><div class="table-wrap"><table><thead><tr><th>Matchup</th><th class="r">Final</th><th>Official ${M.label} pick</th><th class="r">${mk === 'ou' ? 'Prob' : 'To cover'}</th><th class="r">Edge</th><th>Result</th><th class="r">Units</th></tr></thead><tbody>
+    <div class="result-list">
       ${gs.map(g => { const b = betOf(g, OFFICIAL, mk), r = betResult(g, OFFICIAL, mk);
-        const fin = g.final ? `<b>${g.final.away}-${g.final.home}</b>${mk === 'ou' ? ` <span class="mut">(${g.final.home + g.final.away})</span>` : ''}` : `<span class="mut">${esc(etTime(g.time))}</span>`;
-        return `<tr><td><div class="teamcell">${logo(g.away, 'logo-sm')}${esc(shortName(g.away))} <span class="mut">${g.neutral ? 'vs' : '@'}</span> ${logo(g.home, 'logo-sm')}${esc(shortName(g.home))}</div></td>
-        <td class="r num">${fin}</td>
-        <td><b>${esc(b.label)}</b> ${retroTag(b)}</td><td class="r num">${fmt(b.prob * 100, 0)}%</td><td class="r num">${fmt(b.edge)}</td>
-        <td>${resChip(r)}</td><td class="r num ${r === 'W' ? 'pos' : r === 'L' ? 'neg' : 'mut'}">${r ? unitsStr(betUnits(b, r)) : '—'}</td></tr>`; }).join('')}
-    </tbody></table></div></div>`;
+        const fin = g.final
+          ? `${esc(shortName(g.away))} ${g.final.away}, ${esc(shortName(g.home))} ${g.final.home}${mk === 'ou' ? ` · total ${g.final.home + g.final.away}` : ''}`
+          : `${esc(shortName(g.away))} ${g.neutral ? 'vs' : '@'} ${esc(shortName(g.home))} · ${esc(etTime(g.time))}`;
+        return `<div class="result-row ${r || 'pend'}">
+          <div class="rr-main"><div class="rr-pick">${esc(b.label)} ${retroTag(b)}</div><div class="rr-final num">${fin}</div></div>
+          <div class="rr-res">${r ? `<span class="res ${r}">${r === 'P' ? 'PUSH' : r}</span>` : '<span class="res pend">PENDING</span>'}</div>
+        </div>`; }).join('')}
+    </div>`;
   document.getElementById('rdate').onchange = e => { ui.date = e.target.value; renderResults(); };
   wire();
 }
