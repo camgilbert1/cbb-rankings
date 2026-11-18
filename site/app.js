@@ -124,10 +124,11 @@ function route() {
 window.addEventListener('hashchange', route);
 
 /* ================= PICKS (v3 only) ================= */
+// Picks is a pre-game view: the model runs once and posts its picks, so cards show predictions only
+// (no final scores, live status or W/L). Results and Models grade the picks from saved results.
 function gameCard(g) {
-  const live = g.state === 'in', done = !!g.final;
   const v3 = g[OFFICIAL], bet = betOf(g, OFFICIAL);
-  const top = `<span>${done ? '<span class="final">FINAL</span>' : live ? `<span class="live">● ${esc(g.status || 'LIVE')}</span>` : esc(etTime(g.time))}
+  const top = `<span>${esc(etTime(g.time))}
                ${g.neutral ? '<span class="tag">NEUTRAL</span>' : ''}</span>
                <span>${g.spread === null || g.spread === undefined ? 'No line' : 'Line ' + esc(shortName(g.spread <= 0 ? g.home : g.away)) + ' ' + fmtLine(-Math.abs(g.spread))}</span>`;
   const row = (side, isHome) => {
@@ -135,20 +136,14 @@ function gameCard(g) {
     const rk = t ? `<span class="rk">${t.kenpom.rank}</span>` : '';
     const line = g.spread === null || g.spread === undefined ? '' : fmtLine(isHome ? g.spread : -g.spread);
     const isBetSide = bet && (bet.side === 'home') === isHome;
-    // v3's predicted score stays on the card before and after the game, next to the final
     const pred = v3 && v3.home !== null && v3.home !== undefined ? fmt(isHome ? v3.home : v3.away, 0) : '—';
-    let sc = '';
-    if (done) {
-      const mine = isHome ? g.final.home : g.final.away, theirs = isHome ? g.final.away : g.final.home;
-      sc = `<div class="score num ${mine > theirs ? 'win' : 'loss'}">${mine}</div>`;
-    }
     const href = t ? `href="#/team/${side.id}"` : '';
-    return `<div class="team-row${done ? ' has-final' : ''}${isBetSide ? ' bet-side' : ''}">${logo(side)}
+    return `<div class="team-row${isBetSide ? ' bet-side' : ''}">${logo(side)}
       <div style="min-width:0"><a ${href} class="tname">${rk}${esc(shortName(side))}</a>
       <div class="tmeta">${esc(side.record || (t && t.record) || '')}${t ? ' · ' + esc(t.conf) : ''}</div></div>
-      <div class="line num">${line}</div><div class="pred num">${pred}</div>${sc}</div>`;
+      <div class="line num">${line}</div><div class="pred num">${pred}</div></div>`;
   };
-  const colsHead = `<div class="cols-head${done ? ' has-final' : ''}"><span></span><span></span><span>Line</span><span>Pred</span>${done ? '<span>Final</span>' : ''}</div>`;
+  const colsHead = `<div class="cols-head"><span></span><span></span><span>Line</span><span>Pred</span></div>`;
   let detail;
   if (!v3) {
     detail = '<div class="v3line mut">No v3 prediction for this game</div>';
@@ -157,19 +152,17 @@ function gameCard(g) {
     const edge = g.spread === null || g.spread === undefined ? null : Math.abs(v3.margin + g.spread);
     const predTotal = v3.home !== null && v3.home !== undefined ? v3.home + v3.away : null;
     const ou = g.total_line === null || g.total_line === undefined ? null : g.total_line;
-    const actualTotal = done ? g.final.home + g.final.away : null;
     detail = `<div class="v3line"><span><b style="color:var(--violet)">v3</b> ${esc(fav)} by ${fmt(Math.abs(v3.margin))}</span>
       <span class="mut num">${edge === null ? 'no line' : 'edge ' + fmt(edge)}${bet ? '' : ' · no bet'}</span></div>
       <div class="v3line totals"><span>Total <b class="num" style="color:var(--violet)">${predTotal === null ? '—' : fmt(predTotal, 0)}</b> predicted</span>
-      <span class="mut num">${ou === null ? 'O/U line not posted' : 'O/U ' + fmt(ou, 1).replace(/\.0$/, '')}${actualTotal === null ? '' : ' · final ' + actualTotal}</span></div>`;
+      <span class="mut num">${ou === null ? 'O/U line not posted' : 'O/U ' + fmt(ou, 1).replace(/\.0$/, '')}</span></div>`;
   }
   let banner = '';
   if (bet) {
-    const r = done ? betResult(g, OFFICIAL) : null;
     banner = `<div class="official-banner">
-      <div class="ob-top"><span class="ob-label">OFFICIAL PICK</span>${retroTag(bet)}<span class="spacer"></span>${done ? resChip(r) : ''}</div>
+      <div class="ob-top"><span class="ob-label">OFFICIAL PICK</span>${retroTag(bet)}</div>
       <div class="ob-pick">${esc(bet.label)}</div>
-      <div class="ob-meta num">${fmt(bet.prob * 100, 0)}% to cover · edge ${fmt(bet.edge)} · ${fmt(bet.units, 0)}U${done && r ? ' · ' + unitsStr(betUnits(bet, r)) : ''}</div></div>`;
+      <div class="ob-meta num">${fmt(bet.prob * 100, 0)}% to cover · edge ${fmt(bet.edge)} · ${fmt(bet.units, 0)}U</div></div>`;
   }
   let blend = '';
   if (v3 && v3.box !== null && v3.kp !== null && v3.box !== undefined) {
@@ -189,7 +182,7 @@ function renderPicks() {
   const v3Ran = (S.meta.v3_dates || []).includes(ui.date) || day.some(g => g[OFFICIAL]);
   let gs = ui.filter === 'picks' ? picks : day;
   gs = [...gs].sort((a, b) => (betOf(b, OFFICIAL) ? 1 : 0) - (betOf(a, OFFICIAL) ? 1 : 0) || (a.time || '').localeCompare(b.time || ''));
-  const today = betStats(OFFICIAL, day), season = betStats(OFFICIAL, S.games);
+  const season = betStats(OFFICIAL, S.games);
   $app.innerHTML = `
     <div class="page-head"><div><h1>${ui.date === S.meta.today ? "Tonight's Picks" : 'Picks'}</h1>
       <div class="sub">${niceDate(ui.date, { weekday: 'long', month: 'long', day: 'numeric' })} · ${day.length} games · official picks are v3 bets at ${fmt((S.meta.bet_threshold || .6) * 100, 0)}%+ to cover</div></div>
@@ -197,7 +190,6 @@ function renderPicks() {
     ${v3Ran ? '' : `<div class="notice">v3 picks unavailable for this day${S.meta.box_through ? ` (box-score data through ${esc(niceDate(S.meta.box_through))})` : ''}.</div>`}
     <div class="strip">
       <div class="stat accent"><div class="k">Official picks</div><div class="v num">${picks.length}</div><div class="d">of ${day.length} games</div></div>
-      <div class="stat"><div class="k">This day</div><div class="v num">${recStr(today)}</div><div class="d">${today.pending ? today.pending + ' pending' : today.n ? unitsStr(today.units) : 'no graded picks'}</div></div>
       <div class="stat"><div class="k">Season record</div><div class="v num">${recStr(season)}</div><div class="d">${season.pct === null ? 'no graded picks yet' : fmt(season.pct) + '% · break-even ' + S.meta.breakeven + '%'}</div></div>
       <div class="stat"><div class="k">Season units</div><div class="v num ${season.units >= 0 ? 'pos' : 'neg'}">${unitsStr(season.units)}</div><div class="d">${season.bets} bets · 1U each</div></div>
     </div>
