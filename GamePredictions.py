@@ -95,6 +95,7 @@ def get_vegas_lines(game_date=None):
 
         # Build mapping of team names to spreads (today's games only)
         spreads, totals = {}, {}
+        appearances = Counter()
         other_days = 0
         for game in data:
             tip = datetime.fromisoformat(game['commence_time'].replace('Z', '+00:00')).astimezone(eastern)
@@ -105,6 +106,8 @@ def get_vegas_lines(game_date=None):
                 continue
             home_team = game['home_team']
             away_team = game['away_team']
+            appearances[home_team] += 1
+            appearances[away_team] += 1
 
             # Over/under total from every bookmaker that posts one (the Over and Under share the point)
             ou = []
@@ -115,7 +118,7 @@ def get_vegas_lines(game_date=None):
                     point = next((o.get('point') for o in market['outcomes'] if o['name'] == 'Over'), None)
                     if point is not None:
                         ou.append(float(point))
-            if ou and home_team not in totals and away_team not in totals:
+            if ou:
                 total = consensus_line(ou)
                 totals[home_team] = totals[away_team] = total
                 ou_detail = ', '.join(f"{v:g} ×{c}" for v, c in Counter(ou).most_common())
@@ -134,14 +137,21 @@ def get_vegas_lines(game_date=None):
                 continue
 
             line = consensus_line(lines)
-            if home_team in spreads or away_team in spreads:
-                print(f"  ⚠️  {away_team} @ {home_team}: a team appears twice on {game_date}; keeping the first line")
-                continue
             spreads[home_team] = line          # negative means home favorite
             spreads[away_team] = -line + 0.0
             spread_detail = ', '.join(f"{v:+g} ×{c}" for v, c in Counter(lines).most_common())
             print(f"  {away_team} @ {home_team}: {home_team} {line:+.1f} ({len(lines)} books: {spread_detail})")
 
+        # A team name in two games on one day is ambiguous (Nov 18 2026 the feed labelled New Orleans as
+        # "LSU Tigers", so LSU appeared twice and got the wrong game's line). Drop that name's lines; each
+        # game's other team keeps its own, and the lookup falls back to it.
+        ambiguous = sorted(t for t, n in appearances.items() if n > 1)
+        for t in ambiguous:
+            spreads.pop(t, None)
+            totals.pop(t, None)
+        if ambiguous:
+            print(f"::warning::Odds API lists {ambiguous} in more than one game on {game_date}; their lines are ignored "
+                  f"(each opponent's line is still used)")
         print(f"✓ Fetched spreads for {len(spreads) // 2} games and O/U totals for {len(totals) // 2} games on {game_date} "
               f"({other_days} games on other days ignored)")
         print(f"  Odds API teams: {sorted(set(spreads) | set(totals))}")
@@ -190,6 +200,12 @@ def get_todays_games(date=None):
             # Detect neutral-site games (NCAA tournament, conference tournaments, bowls)
             neutral_site = competition.get('neutralSite', False)
 
+            # Betting line attached to this ESPN game (DraftKings via ESPN). 'spread' is the HOME team's
+            # spread (negative = home favored), the same convention as vegas_spread. No name matching needed.
+            odds = next((o for o in (competition.get('odds') or []) if o.get('spread') is not None or o.get('overUnder') is not None), None)
+            espn_spread = float(odds['spread']) + 0.0 if odds and odds.get('spread') is not None else None
+            espn_total = float(odds['overUnder']) if odds and odds.get('overUnder') is not None else None
+
             game_list.append({
                 'game_id': game['id'],
                 'game_time': game['date'],
@@ -197,11 +213,15 @@ def get_todays_games(date=None):
                 'away_team': away_team['team']['displayName'],
                 'status': game['status']['type']['name'],
                 'neutral_site': neutral_site,
+                'espn_spread': espn_spread,
+                'espn_total': espn_total,
+                'line_provider': ((odds or {}).get('provider') or {}).get('name'),
             })
 
         df = pd.DataFrame(game_list)
         neutral_count = df['neutral_site'].sum() if not df.empty else 0
-        print(f"✓ Found {len(df)} games ({neutral_count} neutral-site)")
+        with_lines = int(df['espn_spread'].notna().sum()) if not df.empty else 0
+        print(f"✓ Found {len(df)} games ({neutral_count} neutral-site, {with_lines} with an ESPN line)")
         return df
 
     except Exception as e:
@@ -468,7 +488,7 @@ PREDICTION_HISTORY_TABLE = 'workspace.default.prediction_history'
 HISTORY_COLUMNS = ['game_date', 'game_time', 'home_team', 'away_team', 'predicted_winner', 'win_probability',
                    'predicted_home_score', 'predicted_away_score', 'confidence', 'vegas_spread', 'cover_pick',
                    'cover_confidence', 'prediction_date', 'home_adj_em', 'away_adj_em', 'home_oe', 'away_oe',
-                   'home_de', 'away_de', 'home_rank', 'away_rank'] + [c for c, _ in Betting.BET_COLUMNS] + ['vegas_total', 'neutral_site'] + [c for c, _ in Betting.OU_COLUMNS]
+                   'home_de', 'away_de', 'home_rank', 'away_rank'] + [c for c, _ in Betting.BET_COLUMNS] + ['vegas_total', 'neutral_site'] + [c for c, _ in Betting.OU_COLUMNS] + ['line_source']
 
 
 def upload_predictions_to_databricks(predictions_df, table=PREDICTION_HISTORY_TABLE):
@@ -544,7 +564,7 @@ def upload_predictions_to_databricks(predictions_df, table=PREDICTION_HISTORY_TA
         # Delete ONLY predictions for games we're about to regenerate
         # This preserves predictions for games that have already started (lock mechanism)
         Betting.ensure_bet_columns(cursor, table)
-        for col_def in ("vegas_total DOUBLE", "neutral_site BOOLEAN"):   # over/under line, neutral flag
+        for col_def in ("vegas_total DOUBLE", "neutral_site BOOLEAN", "line_source STRING"):
             try:
                 cursor.execute(f"ALTER TABLE {table} ADD COLUMNS ({col_def})")
             except Exception:
@@ -602,7 +622,8 @@ def upload_predictions_to_databricks(predictions_df, table=PREDICTION_HISTORY_TA
                     {bet_sql},
                     {Betting.sql_value(row.get('vegas_total'))},
                     {Betting.sql_value(bool(row.get('neutral_site', False)))},
-                    {', '.join(Betting.sql_value(row.get(c)) for c, _ in Betting.OU_COLUMNS)}
+                    {', '.join(Betting.sql_value(row.get(c)) for c, _ in Betting.OU_COLUMNS)},
+                    {Betting.sql_value(row.get('line_source'))}
                 )
             """)
 
@@ -733,6 +754,21 @@ def main(date=None):
         if home_spread is None and away_spread is not None:
             home_spread = -away_spread
 
+        # ESPN's line (attached to this ESPN game) is the primary source; the Odds API (matched by team
+        # name) only fills games ESPN has no line for.
+        espn_spread, espn_total = game.get('espn_spread'), game.get('espn_total')
+        espn_spread = None if espn_spread is None or pd.isna(espn_spread) else float(espn_spread)
+        espn_total = None if espn_total is None or pd.isna(espn_total) else float(espn_total)
+        odds_spread, odds_total = home_spread, vegas_total
+        if espn_spread is not None:
+            home_spread, line_source = espn_spread, 'espn'
+        else:
+            line_source = 'odds_api' if home_spread is not None else None
+        if espn_total is not None:
+            vegas_total = espn_total
+        if espn_spread is not None and odds_spread is not None and abs(espn_spread - odds_spread) >= 3:
+            print(f"  ⚠️  ESPN line {espn_spread:+g} vs Odds API {odds_spread:+g} differ by 3+ pts; using ESPN")
+
         # home_spread None = no line found; 0.0 = genuine pick 'em
         if home_spread is not None:
             # Adjusted margin = predicted margin accounting for spread
@@ -824,6 +860,7 @@ def main(date=None):
             **Betting.bet_fields(bet),
             'vegas_total': vegas_total,  # over/under line; None = not posted
             'neutral_site': neutral_site,  # ESPN's flag at prediction time (no home court when True)
+            'line_source': line_source,    # 'espn' (primary) or 'odds_api' (fallback); None = no line
             **Betting.ou_fields(ou_bet),
         })
 
