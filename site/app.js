@@ -205,12 +205,14 @@ function renderPicks() {
   const nAts = day.filter(g => betOf(g, OFFICIAL)).length, nOu = day.filter(g => betOf(g, OFFICIAL, 'ou')).length;
   const v3Ran = (S.meta.v3_dates || []).includes(ui.date) || day.some(g => g[OFFICIAL]);
   let gs = ui.filter === 'picks' ? picks : day;
+  const q = (ui.q || '').trim().toLowerCase();
+  if (q) gs = gs.filter(g => [g.home, g.away].some(s => [s.name, s.short, shortName(s)].some(n => (n || '').toLowerCase().includes(q))));
   gs = [...gs].sort((a, b) => (isPick(b) ? 1 : 0) - (isPick(a) ? 1 : 0) || (a.time || '').localeCompare(b.time || ''));
   const season = betStats(OFFICIAL, S.games), seasonOu = betStats(OFFICIAL, S.games, 'ou');
   const tracker = (label, s) => `<div class="stat"><div class="k">${label} record</div><div class="v num">${recStr(s)}</div>
       <div class="d">${s.pct === null ? (s.bets ? s.bets + ' pending' : 'no graded picks yet') : `${fmt(s.pct)}% · <span class="${s.units >= 0 ? 'pos' : 'neg'}">${unitsStr(s.units)}</span> · ${s.bets} bets`}</div></div>`;
   $app.innerHTML = `
-    <div class="page-head"><div><h1>${ui.date === S.meta.today ? "Tonight's Picks" : 'Picks'}</h1>
+    <div class="page-head"><div><h1>${ui.date === S.meta.today ? "Tonight's Games" : 'Games'}</h1>
       <div class="sub">${niceDate(ui.date, { weekday: 'long', month: 'long', day: 'numeric' })} · ${day.length} games · official picks are v3 bets at ${fmt((S.meta.bet_threshold || .6) * 100, 0)}%+ to cover</div></div>
       <select class="select" id="date">${dates.map(d => `<option value="${d}" ${d === ui.date ? 'selected' : ''}>${niceDate(d)}</option>`).join('')}</select></div>
     ${v3Ran ? '' : `<div class="notice">v3 picks unavailable for this day${S.meta.box_through ? ` (box-score data through ${esc(niceDate(S.meta.box_through))})` : ''}.</div>`}
@@ -222,10 +224,15 @@ function renderPicks() {
     <div class="controls">
       <button class="chip ${ui.filter === 'all' ? 'on' : ''}" data-f="all">All games <span class="mut">${day.length}</span></button>
       <button class="chip ${ui.filter === 'picks' ? 'on' : ''}" data-f="picks">Official picks only <span class="mut">${picks.length}</span></button>
+      <span class="spacer"></span>
+      <input class="search" id="gq" type="search" placeholder="Search teams…" value="${esc(ui.q || '')}" aria-label="Search teams">
     </div>
-    ${gs.length ? `<div class="cards">${gs.map(gameCard).join('')}</div>` : `<div class="empty">${ui.filter === 'picks' ? 'No official picks this day.' : 'No games this day.'}</div>`}`;
+    ${gs.length ? `<div class="cards">${gs.map(gameCard).join('')}</div>` : `<div class="empty">${q ? `No games match “${esc(ui.q)}”.` : ui.filter === 'picks' ? 'No official picks this day.' : 'No games this day.'}</div>`}`;
   document.getElementById('date').onchange = e => { ui.date = e.target.value; renderPicks(); };
   document.querySelectorAll('[data-f]').forEach(b => b.onclick = () => { ui.filter = b.dataset.f; renderPicks(); });
+  const gq = document.getElementById('gq');
+  gq.oninput = e => { ui.q = e.target.value; const pos = e.target.selectionStart; renderPicks();
+    const n = document.getElementById('gq'); n.focus(); n.setSelectionRange(pos, pos); };
 }
 
 /* ================= MODELS (analysis of every model's bets) ================= */
