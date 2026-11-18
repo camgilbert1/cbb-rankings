@@ -24,8 +24,10 @@ BOX_SHARE_DEFAULT = 0.25
 DYN_MIN_GAMES = 400
 
 FOUR_FACTOR_FEATURES = [f'exp_{s}_{m}' for s in 'ha' for m in B.FOUR_FACTORS]
+# Four factors (matchup-level: home offense vs away defense, and vice versa) added Nov 18 2026: honest
+# 2025-26 backtest, v3 margin RMSE 11.525 -> 11.515 (DraftKings ~11.17).
 BOX_FEATURES = ['box_margin_est', 'box_em_diff', 'exp_h_eff', 'exp_a_eff', 'exp_poss_rel',
-                'prior_em_diff', 'home_court', 'home_rest', 'away_rest', 'box_min_gp']
+                'prior_em_diff', 'home_court', 'home_rest', 'away_rest', 'box_min_gp'] + FOUR_FACTOR_FEATURES
 
 
 def merge_frames(v2, box, name_key, verbose=True):
