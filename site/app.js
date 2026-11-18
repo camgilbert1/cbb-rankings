@@ -141,9 +141,9 @@ window.addEventListener('hashchange', route);
 /* ================= PICKS (v3 only) ================= */
 // Picks is a pre-game view: the model runs once and posts its picks, so cards show predictions only
 // (no final scores, live status or W/L). Results and Models grade the picks from saved results.
-function gameCard(g) {
+function gameCard(g, showDate = false) {
   const v3 = g[OFFICIAL], bet = betOf(g, OFFICIAL), ouBet = betOf(g, OFFICIAL, 'ou');
-  const top = `<span>${esc(etTime(g.time))}
+  const top = `<span>${showDate ? esc(niceDate(g.date)) + ' · ' : ''}${esc(etTime(g.time))}
                ${g.neutral ? '<span class="tag">NEUTRAL</span>' : ''}</span>
                <span>${g.spread === null || g.spread === undefined ? 'No line' : 'Line ' + esc(shortName(g.spread <= 0 ? g.home : g.away)) + ' ' + fmtLine(-Math.abs(g.spread))}</span>`;
   const row = (side, isHome) => {
@@ -204,10 +204,14 @@ function renderPicks() {
   const picks = day.filter(isPick);
   const nAts = day.filter(g => betOf(g, OFFICIAL)).length, nOu = day.filter(g => betOf(g, OFFICIAL, 'ou')).length;
   const v3Ran = (S.meta.v3_dates || []).includes(ui.date) || day.some(g => g[OFFICIAL]);
-  let gs = ui.filter === 'picks' ? picks : day;
+  // Search covers every game on the site (all dates, newest first); otherwise the selected day.
+  // Games are in tip-off order; official picks stay in place (highlighted, not moved to the top).
   const q = (ui.q || '').trim().toLowerCase();
-  if (q) gs = gs.filter(g => [g.home, g.away].some(s => [s.name, s.short, shortName(s)].some(n => (n || '').toLowerCase().includes(q))));
-  gs = [...gs].sort((a, b) => (isPick(b) ? 1 : 0) - (isPick(a) ? 1 : 0) || (a.time || '').localeCompare(b.time || ''));
+  const matches = g => [g.home, g.away].some(s => [s.name, s.short, shortName(s)].some(n => (n || '').toLowerCase().includes(q)));
+  let gs = q ? S.games.filter(matches) : day;
+  if (ui.filter === 'picks') gs = gs.filter(isPick);
+  gs = [...gs].sort(q ? (a, b) => b.date.localeCompare(a.date) || (a.time || '').localeCompare(b.time || '')
+                      : (a, b) => (a.time || '').localeCompare(b.time || ''));
   const season = betStats(OFFICIAL, S.games), seasonOu = betStats(OFFICIAL, S.games, 'ou');
   const tracker = (label, s) => `<div class="stat"><div class="k">${label} record</div><div class="v num">${recStr(s)}</div>
       <div class="d">${s.pct === null ? (s.bets ? s.bets + ' pending' : 'no graded picks yet') : `${fmt(s.pct)}% · <span class="${s.units >= 0 ? 'pos' : 'neg'}">${unitsStr(s.units)}</span> · ${s.bets} bets`}</div></div>`;
@@ -227,7 +231,8 @@ function renderPicks() {
       <span class="spacer"></span>
       <input class="search" id="gq" type="search" placeholder="Search teams…" value="${esc(ui.q || '')}" aria-label="Search teams">
     </div>
-    ${gs.length ? `<div class="cards">${gs.map(gameCard).join('')}</div>` : `<div class="empty">${q ? `No games match “${esc(ui.q)}”.` : ui.filter === 'picks' ? 'No official picks this day.' : 'No games this day.'}</div>`}`;
+    ${q ? `<div class="mut small" style="margin:-6px 0 10px">${gs.length} game${gs.length === 1 ? '' : 's'} matching “${esc(ui.q)}” across all dates</div>` : ''}
+    ${gs.length ? `<div class="cards">${gs.map(g => gameCard(g, !!q)).join('')}</div>` : `<div class="empty">${q ? `No games match “${esc(ui.q)}”.` : ui.filter === 'picks' ? 'No official picks this day.' : 'No games this day.'}</div>`}`;
   document.getElementById('date').onchange = e => { ui.date = e.target.value; renderPicks(); };
   document.querySelectorAll('[data-f]').forEach(b => b.onclick = () => { ui.filter = b.dataset.f; renderPicks(); });
   const gq = document.getElementById('gq');
