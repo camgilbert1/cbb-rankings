@@ -135,19 +135,20 @@ function gameCard(g) {
     const rk = t ? `<span class="rk">${t.kenpom.rank}</span>` : '';
     const line = g.spread === null || g.spread === undefined ? '' : fmtLine(isHome ? g.spread : -g.spread);
     const isBetSide = bet && (bet.side === 'home') === isHome;
-    let sc;
+    // v3's predicted score stays on the card before and after the game, next to the final
+    const pred = v3 && v3.home !== null && v3.home !== undefined ? fmt(isHome ? v3.home : v3.away, 0) : '—';
+    let sc = '';
     if (done) {
       const mine = isHome ? g.final.home : g.final.away, theirs = isHome ? g.final.away : g.final.home;
       sc = `<div class="score num ${mine > theirs ? 'win' : 'loss'}">${mine}</div>`;
-    } else {
-      sc = `<div class="score proj num" title="v3 projected score">${v3 && v3.home !== null ? fmt(isHome ? v3.home : v3.away, 0) : ''}</div>`;
     }
     const href = t ? `href="#/team/${side.id}"` : '';
-    return `<div class="team-row${isBetSide ? ' bet-side' : ''}">${logo(side)}
+    return `<div class="team-row${done ? ' has-final' : ''}${isBetSide ? ' bet-side' : ''}">${logo(side)}
       <div style="min-width:0"><a ${href} class="tname">${rk}${esc(shortName(side))}</a>
       <div class="tmeta">${esc(side.record || (t && t.record) || '')}${t ? ' · ' + esc(t.conf) : ''}</div></div>
-      <div class="line num">${line}</div>${sc}</div>`;
+      <div class="line num">${line}</div><div class="pred num">${pred}</div>${sc}</div>`;
   };
+  const colsHead = `<div class="cols-head${done ? ' has-final' : ''}"><span></span><span></span><span>Line</span><span>Pred</span>${done ? '<span>Final</span>' : ''}</div>`;
   let detail;
   if (!v3) {
     detail = '<div class="v3line mut">No v3 prediction for this game</div>';
@@ -172,7 +173,7 @@ function gameCard(g) {
       <div class="bar"><span style="width:${share}%"></span></div></div>`;
   }
   return `<div class="card${bet ? ' official' : ''}"><div class="card-top">${top}</div>${banner}
-    <div class="teams">${row(g.away, false)}${row(g.home, true)}</div>${detail}${blend}</div>`;
+    <div class="teams">${colsHead}${row(g.away, false)}${row(g.home, true)}</div>${detail}${blend}</div>`;
 }
 
 function renderPicks() {

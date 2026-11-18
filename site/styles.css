@@ -71,8 +71,14 @@ a { color: inherit; text-decoration: none; }
 .card-top .final { color: var(--text); }
 .tag { display: inline-block; padding: 1px 7px; border-radius: 5px; font-size: 11px; font-weight: 700; background: var(--panel-2); color: var(--muted); margin-left: 6px; }
 .teams { padding: 6px 14px; }
-.team-row { display: grid; grid-template-columns: 34px 1fr auto auto; gap: 10px; align-items: center; padding: 7px 0; }
+.team-row, .cols-head { display: grid; grid-template-columns: 34px 1fr 52px 40px; gap: 10px; align-items: center; }
+.team-row { padding: 7px 0; }
+.team-row.has-final, .cols-head.has-final { grid-template-columns: 34px 1fr 52px 40px 34px; }
 .team-row + .team-row { border-top: 1px dashed var(--line); }
+.cols-head { padding-top: 4px; color: var(--dim); font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.cols-head span { text-align: right; }
+.pred { color: var(--violet); font-weight: 700; font-size: 15px; text-align: right; }
+.has-final .pred { color: var(--muted); font-size: 13px; }
 .logo { width: 32px; height: 32px; object-fit: contain; }
 .logo-sm { width: 22px; height: 22px; object-fit: contain; vertical-align: middle; }
 .logo-xl { width: 88px; height: 88px; object-fit: contain; }
