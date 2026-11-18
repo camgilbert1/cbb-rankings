@@ -215,7 +215,24 @@ def load_games():
     df['game_date'] = pd.to_datetime(df['game_date'])
     for season, cnt in df.groupby('season').size().items():
         print(f"  Season {season}: {cnt} games")
+    attach_elo(df)
     return df
+
+
+ELO_STATE = None   # Elo ratings after the last completed game; set by load_games(), used for today's v3 rows
+
+
+def attach_elo(df):
+    """Point-in-time Elo (Elo.py) for every game, used by v3 only. On failure the column is left blank:
+    XGBoost then ignores it and v3 runs as it did before Elo, with a warning."""
+    global ELO_STATE
+    import Elo
+    try:
+        df[Elo.FEATURE], ELO_STATE = Elo.build(df, key=name_key)
+        print(f"  Elo attached ({df[Elo.FEATURE].notna().sum()} games)")
+    except Exception as e:
+        df[Elo.FEATURE], ELO_STATE = np.nan, None
+        print(f"::warning::Elo unavailable ({type(e).__name__}: {e}); v3 runs without it this time")
 
 
 # =============================================================================
@@ -674,8 +691,11 @@ def run_v3(models, df_v2, games_today, ratings_df, state, spreads, bet_params=Be
         df = df[df['season'] >= 2024].reset_index(drop=True)
         weights, weights_used = compute_weights(df)
         box_model = V3.fit_box_model(df, weights, XGBOOST_PARAMS)
-        trust, desc = V3.fit_trust(df, CURRENT_SEASON, MARGIN_FEATURES, XGBOOST_PARAMS, weights_used)
-        print(f"  Box model trained on {len(df)} games (box scores through {latest})")
+        # v3's own KenPom half: v2's features + Elo, trained exactly like v2's margin model (v2 is unchanged)
+        kp_features = MARGIN_FEATURES + V3.KP_EXTRA_FEATURES
+        kp_model = XGBRegressor(**XGBOOST_PARAMS).fit(df[kp_features], df['margin'], sample_weight=weights)
+        trust, desc = V3.fit_trust(df, CURRENT_SEASON, kp_features, XGBOOST_PARAMS, weights_used)
+        print(f"  Box model and v3 KenPom half (with Elo) trained on {len(df)} games (box scores through {latest})")
         print(f"  Trust weights: {desc}")
         try:   # current box-score team ratings for the website (BuildSite.py reads this)
             os.makedirs(os.path.join('site', 'data'), exist_ok=True)
@@ -684,17 +704,19 @@ def run_v3(models, df_v2, games_today, ratings_df, state, spreads, bet_params=Be
         except Exception as e:
             print(f"  (could not write box ratings for the site: {e})")
 
-        margin = models.get('margin_model')
+        import Elo
         X = upcoming_feature_rows(games_today, ratings_df, state)
-        if margin is None or X.empty:
+        if X.empty:
             return []
+        X[Elo.FEATURE] = [Elo.upcoming(ELO_STATE, CURRENT_SEASON, name_key(r['home_team']), name_key(r['away_team']),
+                                       bool(r.get('neutral_site', False))) for r in X.to_dict('records')]
         Xb = B.upcoming_rows(X.to_dict('records'), bstate)
         if Xb.empty:
             return []
         skipped = len(X) - len(Xb)
         if skipped:
             print(f"  {skipped} game(s) skipped — team not in box-score ratings yet")
-        kp = margin['model'].predict(Xb[margin['features']])
+        kp = kp_model.predict(Xb[kp_features])
         bx = box_model.predict(Xb[V3.BOX_FEATURES])
         share = trust(Xb['box_min_gp'].values)
         blended = share * bx + (1 - share) * kp

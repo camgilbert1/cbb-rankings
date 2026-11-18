@@ -100,7 +100,8 @@ def accuracy_compare():
         tr = df[df['season'].isin(TRAIN_SEASONS)].reset_index(drop=True)
         te = df[df['season'] == TEST_SEASON].reset_index(drop=True)
         p2 = fit_predict(tr, te, T.MARGIN_FEATURES, 'margin')
-        p3 = V3.BOX_SHARE_DEFAULT * fit_predict(tr, te, V3.BOX_FEATURES, 'margin') + (1 - V3.BOX_SHARE_DEFAULT) * p2
+        p3 = V3.BOX_SHARE_DEFAULT * fit_predict(tr, te, V3.BOX_FEATURES, 'margin') \
+             + (1 - V3.BOX_SHARE_DEFAULT) * fit_predict(tr, te, T.MARGIN_FEATURES + V3.KP_EXTRA_FEATURES, 'margin')
         te = te.assign(p2=p2, p3=p3)
         if lines is None:
             lines = attach_lines(te)[['game_date', 'home_team', 'away_team', 'home_spread']]
@@ -191,7 +192,8 @@ def main():
 
     preds = {'v2': fit_predict(tr, te, T.MARGIN_FEATURES, 'margin')}
     box_pred = fit_predict(tr, te, V3.BOX_FEATURES, 'margin')
-    preds['v3'] = V3.BOX_SHARE_DEFAULT * box_pred + (1 - V3.BOX_SHARE_DEFAULT) * preds['v2']
+    v3_kp = fit_predict(tr, te, T.MARGIN_FEATURES + V3.KP_EXTRA_FEATURES, 'margin')     # v3's own KenPom half (Elo)
+    preds['v3'] = V3.BOX_SHARE_DEFAULT * box_pred + (1 - V3.BOX_SHARE_DEFAULT) * v3_kp
     for k, p in preds.items():
         te[f'pred_{k}'] = p
     te = attach_lines(te)

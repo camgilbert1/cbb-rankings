@@ -26,8 +26,12 @@ DYN_MIN_GAMES = 400
 FOUR_FACTOR_FEATURES = [f'exp_{s}_{m}' for s in 'ha' for m in B.FOUR_FACTORS]
 # Four factors (matchup-level: home offense vs away defense, and vice versa) added Nov 18 2026: honest
 # 2025-26 backtest, v3 margin RMSE 11.525 -> 11.515 (DraftKings ~11.17).
+# Our own point-in-time Elo (Elo.py) added to BOTH halves Nov 18 2026: honest v3 RMSE 11.515 -> 11.503 (test
+# 2025-26), 11.405 -> 11.390 (test 2024-25). v3's KenPom half = v2's features + these, trained separately from v2.
+KP_EXTRA_FEATURES = ['elo_diff']
 BOX_FEATURES = ['box_margin_est', 'box_em_diff', 'exp_h_eff', 'exp_a_eff', 'exp_poss_rel',
-                'prior_em_diff', 'home_court', 'home_rest', 'away_rest', 'box_min_gp'] + FOUR_FACTOR_FEATURES
+                'prior_em_diff', 'home_court', 'home_rest', 'away_rest', 'box_min_gp'] + FOUR_FACTOR_FEATURES \
+               + KP_EXTRA_FEATURES
 
 
 def merge_frames(v2, box, name_key, verbose=True):
