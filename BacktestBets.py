@@ -39,12 +39,12 @@ def load_table(sql):
     return df
 
 
-def day_of_kenpom(games):
-    """Replace the test season's end-of-season KenPom with KenPom as of each game's date."""
-    daily = load_table(f"SELECT rating_date, team_name, adj_o, adj_d, adj_em, tempo FROM workspace.default.kenpom_daily WHERE season = {TEST_SEASON}")
+def day_of_kenpom(games, season=TEST_SEASON):
+    """Replace a season's end-of-season KenPom with KenPom as of each game's date (kenpom_daily)."""
+    daily = load_table(f"SELECT rating_date, team_name, adj_o, adj_d, adj_em, tempo FROM workspace.default.kenpom_daily WHERE season = {season}")
     daily['rating_date'] = pd.to_datetime(daily['rating_date'])
     key = {(r.rating_date, T.name_key(r.team_name).lower()): r for r in daily.itertuples()}
-    espn2kp = {T.name_key(e): kp for e, kp in D1_TEAMS[TEST_SEASON].items()}
+    espn2kp = {T.name_key(e): kp for e, kp in D1_TEAMS[season].items()}
     # KenPom only changes when games are played: a date without an archive page uses the latest earlier
     # date's ratings. Never fall back to end-of-season ratings (that would leak the season's outcome).
     archive_dates = sorted(daily['rating_date'].unique())
@@ -53,7 +53,7 @@ def day_of_kenpom(games):
         return pd.Timestamp(archive_dates[i]) if i >= 0 else None
     g = games.copy()
     hit = 0
-    for i in g.index[g['season'] == TEST_SEASON]:
+    for i in g.index[g['season'] == season]:
         d = as_of(pd.Timestamp(g.at[i, 'game_date']))
         for side in ('home', 'away'):
             kp = espn2kp.get(T.name_key(g.at[i, f'{side}_team']))
@@ -65,9 +65,66 @@ def day_of_kenpom(games):
             hit += 1
             g.at[i, f'{side}_adj_o'], g.at[i, f'{side}_adj_d'] = r.adj_o, r.adj_d
             g.at[i, f'{side}_adj_em'], g.at[i, f'{side}_tempo'] = r.adj_em, r.tempo
-    n = 2 * int((g['season'] == TEST_SEASON).sum())
-    print(f"  day-of KenPom attached to {hit} of {n} {TEST_SEASON} team-sides")
+    n = 2 * int((g['season'] == season).sum())
+    print(f"  day-of KenPom attached to {hit} of {n} {season} team-sides")
     return g
+
+
+def accuracy_compare():
+    """
+    Day-of KenPom for TRAINING (#5): does training on the ratings KenPom showed on each game's date (instead
+    of end-of-season ratings) predict 2025-26 more accurately? Both versions predict with day-of ratings.
+    Reports margin RMSE / MAE / winner accuracy for v2 and v3, with the DraftKings line as a benchmark.
+
+    NOTE: since Nov 18 2026 ml_game_features already holds day-of KenPom for 2024-26 (#5 adopted), so both
+    rows below now use day-of training data. Result when this was run before the switch (2025-26 test):
+    v3 RMSE 11.54 -> 11.52, v2 11.60 -> 11.57; DraftKings line 11.17. The pre-switch table is kept in
+    Databricks as ml_game_features_backup_20261118.
+    """
+    print("Building frames...")
+    box, _ = B.build_asof(V3.SEASONS, current_season=T.CURRENT_SEASON, verbose=False)
+    box = B.add_box_features(box)
+    raw = T.load_games()
+    test_games = day_of_kenpom(raw, TEST_SEASON)
+    frames = {'end-of-season KenPom (today)': test_games}
+    pit = test_games
+    for s in TRAIN_SEASONS:
+        pit = day_of_kenpom(pit, s)
+    frames['day-of KenPom (#5)'] = pit
+
+    lines = None
+    rows = []
+    for label, games in frames.items():
+        v2, _ = T.build_training_frame(games)
+        df = V3.merge_frames(v2, box, T.name_key, verbose=False)
+        tr = df[df['season'].isin(TRAIN_SEASONS)].reset_index(drop=True)
+        te = df[df['season'] == TEST_SEASON].reset_index(drop=True)
+        p2 = fit_predict(tr, te, T.MARGIN_FEATURES, 'margin')
+        p3 = V3.BOX_SHARE_DEFAULT * fit_predict(tr, te, V3.BOX_FEATURES, 'margin') + (1 - V3.BOX_SHARE_DEFAULT) * p2
+        te = te.assign(p2=p2, p3=p3)
+        if lines is None:
+            lines = attach_lines(te)[['game_date', 'home_team', 'away_team', 'home_spread']]
+        key = ['game_date', 'home_team', 'away_team']
+        both = te.merge(lines, on=key, how='left')
+        for name, col in (('v2', 'p2'), ('v3', 'p3')):
+            err = both[col] - both['margin']
+            ln = both['home_spread'].notna()
+            rows.append((label, name, len(both), np.sqrt(np.mean(err ** 2)), np.mean(np.abs(err)),
+                         np.mean(np.sign(both[col]) == np.sign(both['margin'])),
+                         np.sqrt(np.mean(err[ln] ** 2)), ln.sum(), len(tr)))
+        # early season (November-December) is where day-of vs end-of-season ratings differ most
+        early = both['game_date'] < pd.Timestamp(f"{TEST_SEASON}-01-01")
+        for name, col in (('v2', 'p2'), ('v3', 'p3')):
+            e = both.loc[early, col] - both.loc[early, 'margin']
+            rows.append((label + ' | Nov-Dec only', name, int(early.sum()), np.sqrt(np.mean(e ** 2)), np.mean(np.abs(e)),
+                         np.mean(np.sign(both.loc[early, col]) == np.sign(both.loc[early, 'margin'])), np.nan, 0, len(tr)))
+    ln = lines.merge(te[['game_date', 'home_team', 'away_team', 'margin']], on=['game_date', 'home_team', 'away_team'])
+    vegas = np.sqrt(np.mean((-ln['home_spread'] - ln['margin']) ** 2))
+    print(f"\nMARGIN ACCURACY on {TEST_SEASON} (predicted with day-of KenPom; DraftKings line RMSE {vegas:.2f} on {len(ln)} games)")
+    print(f"{'trained on':44s} {'model':5s} {'games':>6s} {'RMSE':>6s} {'MAE':>6s} {'winner':>7s} {'RMSE on lined games':>20s}")
+    for label, name, n, rmse, mae, win, rmse_l, nl, ntr in rows:
+        lined = '' if np.isnan(rmse_l) else f"{rmse_l:6.2f} (n={nl})"
+        print(f"{label:44s} {name:5s} {n:6d} {rmse:6.2f} {mae:6.2f} {win:7.1%} {lined:>20s}")
 
 
 def attach_lines(test):
@@ -184,4 +241,5 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    import sys
+    accuracy_compare() if '--accuracy' in sys.argv else main()

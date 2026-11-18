@@ -239,6 +239,35 @@ def upload_features(records, season, delete_where):
         return 0
 
 
+def day_of_records(records, season):
+    """Swap the season's KenPom fields to day-of ratings (KenPomDaily) when kenpom_daily has the season."""
+    import pandas as pd
+    import KenPomDaily as KD
+    try:
+        conn = sql.connect(server_hostname=DATABRICKS_HOST, http_path=DATABRICKS_HTTP_PATH, access_token=DATABRICKS_TOKEN)
+        cur = conn.cursor()
+        daily = KD.load_daily(cur, season)
+        cur.close(); conn.close()
+    except Exception as e:
+        print(f"  (day-of KenPom unavailable for {season}: {e}; keeping season-end ratings)")
+        return records
+    if daily.empty:
+        print(f"  (no day-of KenPom for {season}; keeping season-end ratings)")
+        return records
+    df = pd.DataFrame(records)
+    df['season'] = season
+    df['game_date'] = pd.to_datetime(df['game_date'])
+    df = KD.apply_day_of(df, season, daily)
+    df['ratings_point_in_time'] = df['home_adj_em'].notna() & df['away_adj_em'].notna()
+    df['game_date'] = df['game_date'].dt.strftime('%Y-%m-%d')
+    out = df.drop(columns=['season']).to_dict('records')
+    for r in out:                                  # NaN -> None for the uploader
+        for k_, v in r.items():
+            if isinstance(v, float) and v != v:
+                r[k_] = None
+    return out
+
+
 def main():
     print("=" * 70)
     print("HISTORICAL GAME FEATURES BACKFILL  (KenPom-based)")
@@ -291,6 +320,9 @@ def main():
         rate = both_d1 / games_found * 100 if games_found else 0
         print(f"  Done: {games_found} games, {both_d1} D1-vs-D1 with features ({rate:.0f}%), {neutral} neutral-site")
 
+        # Train on the ratings KenPom showed on each game's date (#5), not end-of-season ratings, whenever
+        # kenpom_daily has the season (BackfillKenPomDaily.py). Otherwise a rebuild would undo the fix.
+        all_records = day_of_records(all_records, season)
         total += upload_features(all_records, season, delete_where=f"season = {season}")
 
     print(f"\n{'=' * 70}")

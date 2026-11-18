@@ -22,7 +22,7 @@ from kenpompy.utils import get_html, login
 
 load_dotenv()
 TABLE = 'workspace.default.kenpom_daily'
-SEED_SUFFIX = re.compile(r'\d+[A-Z0-9]*$')   # "Michigan1CH", "Iowa St.2S16" -> tournament seed/round tags
+SEED_SUFFIX = re.compile(r'\d+[A-Za-z0-9]*$')   # tournament tags: "Michigan1CH", "Iowa St.2S16", runner-up "Purdue12nd"
 
 
 def parse_archive(html, rating_date, season):
