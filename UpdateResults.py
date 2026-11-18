@@ -183,7 +183,17 @@ OUTCOME_COLUMNS = ['game_date', 'home_team', 'away_team', 'home_adj_em', 'away_a
                    'home_de', 'away_de', 'home_rank', 'away_rank', 'predicted_winner', 'predicted_home_score',
                    'predicted_away_score', 'predicted_margin', 'win_probability', 'confidence', 'vegas_spread',
                    'cover_pick', 'actual_home_score', 'actual_away_score', 'actual_margin', 'actual_winner',
-                   'su_correct', 'ats_correct', 'margin_error', 'recorded_at'] + [c for c, _ in Betting.BET_COLUMNS]
+                   'su_correct', 'ats_correct', 'margin_error', 'recorded_at'] + [c for c, _ in Betting.BET_COLUMNS] \
+                  + ['vegas_total', 'ou_correct'] + [c for c, _ in Betting.OU_COLUMNS]
+
+# O/U grade of the model's lean on one game: NULL = no line or push; 1 = the lean (over if predicted total is
+# above the line) was right. A model's O/U bet record is this grade on rows where ou_is_bet is true.
+OU_GRADE_SQL = """CASE
+                    WHEN p.vegas_total IS NULL THEN NULL
+                    WHEN (p.res_home + p.res_away) = p.vegas_total THEN NULL
+                    WHEN ({pred_total} > p.vegas_total) = ((p.res_home + p.res_away) > p.vegas_total) THEN 1
+                    ELSE 0
+                END"""
 
 
 def update_prediction_outcomes(outcomes_table='workspace.default.prediction_outcomes',
@@ -241,10 +251,19 @@ def update_prediction_outcomes(outcomes_table='workspace.default.prediction_outc
 
         Betting.ensure_bet_columns(cursor, outcomes_table)
         Betting.ensure_bet_columns(cursor, history_table)   # no-op once GamePredictions has run
+        Betting.ensure_ou_columns(cursor, outcomes_table)
+        Betting.ensure_ou_columns(cursor, history_table)
+        try:
+            cursor.execute(f"ALTER TABLE {outcomes_table} ADD COLUMNS (ou_correct INT)")
+        except Exception:
+            pass
 
         # Insert only newly completed games not already in prediction_outcomes.
         # Columns are named so the insert can't shift values when the table gains columns.
         bet_select = ',\n                '.join(f"p.{c}" for c, _ in Betting.BET_COLUMNS)
+        ou_select = ',\n                '.join(
+            ['p.vegas_total', OU_GRADE_SQL.format(pred_total='(p.predicted_home_score + p.predicted_away_score)') + ' AS ou_correct']
+            + [f"p.{c}" for c, _ in Betting.OU_COLUMNS])
         cursor.execute(f"""
             INSERT INTO {outcomes_table} ({', '.join(OUTCOME_COLUMNS)})
             SELECT
@@ -285,7 +304,8 @@ def update_prediction_outcomes(outcomes_table='workspace.default.prediction_outc
                 END AS ats_correct,
                 ((p.predicted_home_score - p.predicted_away_score) - (p.res_home - p.res_away)) AS margin_error,
                 current_timestamp() AS recorded_at,
-                {bet_select}
+                {bet_select},
+                {ou_select}
             FROM {matched_results_sql(history_table, results_table, where=f'''
                 AND NOT EXISTS (SELECT 1 FROM {outcomes_table} o
                                 WHERE o.home_team = p.home_team AND o.away_team = p.away_team
@@ -320,10 +340,16 @@ def update_ml_ats_results(ml_table='workspace.default.ml_predictions',
         )
         cursor = connection.cursor()
 
+        Betting.ensure_ou_columns(cursor, ml_table)
+        try:
+            cursor.execute(f"ALTER TABLE {ml_table} ADD COLUMNS (ml_ou_correct INT)")
+        except Exception:
+            pass
         cursor.execute(f"""
             SELECT p.game_date, p.home_team, p.away_team,
                    p.ml_predicted_margin, p.vegas_spread,
-                   p.res_home, p.res_away, COALESCE(p.model_family, 'v1') AS family
+                   p.res_home, p.res_away, COALESCE(p.model_family, 'v1') AS family,
+                   p.ml_predicted_total, p.vegas_total
             FROM {matched_results_sql(ml_table, results_table, partition_extra=", COALESCE(p.model_family, 'v1')",
                                       where='AND p.actual_home_score IS NULL')} p
             WHERE p.rn = 1
@@ -332,8 +358,13 @@ def update_ml_ats_results(ml_table='workspace.default.ml_predictions',
 
         updated = 0
         for row in rows:
-            game_date, home, away, pred_margin, spread, actual_home, actual_away, family = row
+            game_date, home, away, pred_margin, spread, actual_home, actual_away, family, pred_total, total_line = row
             actual_margin = actual_home - actual_away
+            # O/U grade of the model's lean (same rule as the Formula's ou_correct): NULL = no line or push
+            if total_line is None or pred_total is None or (actual_home + actual_away) == total_line:
+                ou_correct = None
+            else:
+                ou_correct = 1 if (pred_total > total_line) == ((actual_home + actual_away) > total_line) else 0
 
             if spread is not None:  # 0 = pick 'em (graded); NULL = no line
                 ml_pick_home     = (pred_margin + spread) > 0
@@ -353,7 +384,8 @@ def update_ml_ats_results(ml_table='workspace.default.ml_predictions',
                 UPDATE {ml_table}
                 SET actual_home_score = {actual_home},
                     actual_away_score = {actual_away},
-                    ml_ats_correct = {ats_val}
+                    ml_ats_correct = {ats_val},
+                    ml_ou_correct = {ou_correct if ou_correct is not None else 'NULL'}
                 WHERE home_team = '{home_esc}'
                   AND away_team = '{away_esc}'
                   AND game_date = '{game_date}'

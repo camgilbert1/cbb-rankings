@@ -173,6 +173,16 @@ def bet_of(r):
             'units': clean(r.bet_units), 'retro': bool(retro) if retro is not None and not pd.isna(retro) else False}
 
 
+def ou_bet_of(r):
+    """A model's over/under bet on one game from its stored O/U columns, or None."""
+    flag = getattr(r, 'ou_is_bet', None)
+    if flag is None or pd.isna(flag) or not bool(flag):
+        return None
+    retro = getattr(r, 'ou_retro', None)
+    return {'side': r.ou_side, 'label': r.ou_label, 'edge': clean(r.ou_edge), 'prob': clean(r.ou_prob),
+            'units': clean(r.ou_units), 'retro': bool(retro) if retro is not None and not pd.isna(retro) else False}
+
+
 def build_games(t, key2id, id2name, neutral, finals, slates):
     """One record per game, keyed by (date, home key, away key)."""
     games = {}
@@ -199,11 +209,12 @@ def build_games(t, key2id, id2name, neutral, finals, slates):
                         'margin': clean(r.predicted_home_score - r.predicted_away_score),
                         'win_prob': clean(r.win_probability), 'confidence': r.confidence,
                         'cover_pick': r.cover_pick, 'cover_confidence': r.cover_confidence, 'ats': None,
-                        'bet': bet_of(r)}
+                        'bet': bet_of(r), 'ou': None, 'ou_bet': ou_bet_of(r)}
     for r in t['outcomes'].itertuples(index=False):
         g = get(r.game_date, r.home_team, r.away_team)
         if g['formula'] is not None:
             g['formula']['ats'] = clean(r.ats_correct)
+            g['formula']['ou'] = clean(getattr(r, 'ou_correct', None))
         if r.actual_home_score is not None and not pd.isna(r.actual_home_score):
             g['final'] = {'home': int(r.actual_home_score), 'away': int(r.actual_away_score)}
     for r in t['ml'].itertuples(index=False):
@@ -212,7 +223,10 @@ def build_games(t, key2id, id2name, neutral, finals, slates):
                              'home': clean(r.ml_predicted_home_score), 'away': clean(r.ml_predicted_away_score),
                              'win_prob': clean(r.ml_win_probability), 'confidence': r.ats_confidence,
                              'ats': clean(r.ml_ats_correct), 'box': clean(r.box_margin), 'kp': clean(r.kp_margin),
-                             'box_share': clean(r.box_share), 'bet': bet_of(r)}
+                             'box_share': clean(r.box_share), 'bet': bet_of(r),
+                             'ou': clean(getattr(r, 'ml_ou_correct', None)), 'ou_bet': ou_bet_of(r)}
+        if g['total_line'] is None:
+            g['total_line'] = clean(getattr(r, 'vegas_total', None))
         if g['spread'] is None:
             g['spread'] = clean(r.vegas_spread)
     # ESPN can relabel home/away after we predict (neutral sites). Each lookup below tries the game as

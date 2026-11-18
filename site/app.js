@@ -63,13 +63,25 @@ const hasModel = g => MODELS.some(m => g[m.key]);
    A model's bet is stored per game (BuildSite: g[model].bet = {side, label, edge, prob, units, retro}).
    Records count ONLY bets. A bet's result is the stored ATS grade (it grades the model's side, which is
    always the bet side); a push or a game graded only on the site falls back to the final score. */
-const betOf = (g, key) => (g[key] && g[key].bet) || null;
-function betResult(g, key) {
-  const b = betOf(g, key);
+// Two markets, tracked separately everywhere: against the spread and over/under.
+// g[model].bet / .ats = spread bet and grade; g[model].ou_bet / .ou = O/U bet and grade.
+const MARKETS = {
+  ats: { bet: 'bet', grade: 'ats', label: 'ATS' },
+  ou: { bet: 'ou_bet', grade: 'ou', label: 'O/U' },
+};
+const betOf = (g, key, mk = 'ats') => (g[key] && g[key][MARKETS[mk].bet]) || null;
+function betResult(g, key, mk = 'ats') {
+  const b = betOf(g, key, mk);
   if (!b || !g.final) return null;
-  const stored = g[key].ats;
+  const stored = g[key][MARKETS[mk].grade];
   if (stored === 1) return 'W';
   if (stored === 0) return 'L';
+  if (mk === 'ou') {
+    if (g.total_line === null || g.total_line === undefined) return null;
+    const tot = g.final.home + g.final.away;
+    if (tot === g.total_line) return 'P';
+    return (tot > g.total_line) === (b.side === 'over') ? 'W' : 'L';
+  }
   if (g.spread === null || g.spread === undefined) return null;
   const c = (g.final.home - g.final.away) + g.spread;
   if (c === 0) return 'P';
@@ -77,13 +89,13 @@ function betResult(g, key) {
 }
 const betUnits = (b, r) => r === 'W' ? (b.units || 1) * WIN_PAYOUT : r === 'L' ? -(b.units || 1) : 0;
 
-function betStats(key, games) {
+function betStats(key, games, mk = 'ats') {
   const st = { bets: 0, w: 0, l: 0, p: 0, pending: 0, units: 0, risked: 0, probSum: 0, retro: 0, live: 0, daily: {} };
   for (const g of games) {
-    const b = betOf(g, key);
+    const b = betOf(g, key, mk);
     if (!b) continue;
     st.bets++; st.probSum += b.prob || 0; b.retro ? st.retro++ : st.live++;
-    const r = betResult(g, key);
+    const r = betResult(g, key, mk);
     if (!r) { st.pending++; continue; }
     if (r === 'W') st.w++; else if (r === 'L') st.l++; else st.p++;
     const u = betUnits(b, r);
@@ -100,6 +112,9 @@ const recStr = s => `${s.w}-${s.l}${s.p ? '-' + s.p : ''}`;
 const resChip = r => r ? `<span class="res ${r}">${r === 'P' ? 'PUSH' : r}</span>` : '<span class="res pend">PENDING</span>';
 const retroTag = b => b && b.retro ? '<span class="tag retro" title="Bet applied after the fact to the stored pre-game prediction and line">RETRO</span>' : '';
 const unitsStr = u => `${u > 0 ? '+' : ''}${u.toFixed(2)}u`;
+/* ATS | O/U toggle; `ui` holds the page's chosen market in ui.mk */
+const marketToggle = (ui, attr = 'data-mk') => `<div class="seg">${Object.entries(MARKETS).map(([k, m]) =>
+  `<button class="chip ${(ui.mk || 'ats') === k ? 'on' : ''}" ${attr}="${k}">${m.label}</button>`).join('')}</div>`;
 
 /* ---------------- data ---------------- */
 async function load() {
@@ -127,7 +142,7 @@ window.addEventListener('hashchange', route);
 // Picks is a pre-game view: the model runs once and posts its picks, so cards show predictions only
 // (no final scores, live status or W/L). Results and Models grade the picks from saved results.
 function gameCard(g) {
-  const v3 = g[OFFICIAL], bet = betOf(g, OFFICIAL);
+  const v3 = g[OFFICIAL], bet = betOf(g, OFFICIAL), ouBet = betOf(g, OFFICIAL, 'ou');
   const top = `<span>${esc(etTime(g.time))}
                ${g.neutral ? '<span class="tag">NEUTRAL</span>' : ''}</span>
                <span>${g.spread === null || g.spread === undefined ? 'No line' : 'Line ' + esc(shortName(g.spread <= 0 ? g.home : g.away)) + ' ' + fmtLine(-Math.abs(g.spread))}</span>`;
@@ -155,14 +170,20 @@ function gameCard(g) {
     detail = `<div class="v3line"><span><b style="color:var(--violet)">v3</b> ${esc(fav)} by ${fmt(Math.abs(v3.margin))}</span>
       <span class="mut num">${edge === null ? 'no line' : 'edge ' + fmt(edge)}${bet ? '' : ' · no bet'}</span></div>
       <div class="v3line totals"><span>Total <b class="num" style="color:var(--violet)">${predTotal === null ? '—' : fmt(predTotal, 0)}</b> predicted</span>
-      <span class="mut num">${ou === null ? 'O/U line not posted' : 'O/U ' + fmt(ou, 1).replace(/\.0$/, '')}</span></div>`;
+      <span class="mut num">${ou === null ? 'O/U line not posted' : 'O/U ' + fmt(ou, 1).replace(/\.0$/, '')}${ou === null || ouBet ? '' : ' · no bet'}</span></div>`;
   }
   let banner = '';
   if (bet) {
-    banner = `<div class="official-banner">
-      <div class="ob-top"><span class="ob-label">OFFICIAL PICK</span>${retroTag(bet)}</div>
+    banner += `<div class="official-banner">
+      <div class="ob-top"><span class="ob-label">OFFICIAL PICK · ATS</span>${retroTag(bet)}</div>
       <div class="ob-pick">${esc(bet.label)}</div>
       <div class="ob-meta num">${fmt(bet.prob * 100, 0)}% to cover · edge ${fmt(bet.edge)} · ${fmt(bet.units, 0)}U</div></div>`;
+  }
+  if (ouBet) {
+    banner += `<div class="official-banner">
+      <div class="ob-top"><span class="ob-label">OFFICIAL PICK · O/U</span>${retroTag(ouBet)}</div>
+      <div class="ob-pick">${esc(ouBet.label)}</div>
+      <div class="ob-meta num">${fmt(ouBet.prob * 100, 0)}% · edge ${fmt(ouBet.edge)} pts · ${fmt(ouBet.units, 0)}U</div></div>`;
   }
   let blend = '';
   if (v3 && v3.box !== null && v3.kp !== null && v3.box !== undefined) {
@@ -170,7 +191,7 @@ function gameCard(g) {
     blend = `<div class="blendbar">Box-score model <b class="num">${sgn(v3.box)}</b> · KenPom model <b class="num">${sgn(v3.kp)}</b> · ${share}% box
       <div class="bar"><span style="width:${share}%"></span></div></div>`;
   }
-  return `<div class="card${bet ? ' official' : ''}"><div class="card-top">${top}</div>${banner}
+  return `<div class="card${bet || ouBet ? ' official' : ''}"><div class="card-top">${top}</div>${banner}
     <div class="teams">${colsHead}${row(g.away, false)}${row(g.home, true)}</div>${detail}${blend}</div>`;
 }
 
@@ -178,20 +199,24 @@ function renderPicks() {
   const dates = [...new Set(S.games.map(g => g.date))].sort().reverse();
   const ui = S.ui.picks = S.ui.picks || { date: dates.includes(S.meta.today) ? S.meta.today : dates[0], filter: 'all' };
   const day = S.games.filter(g => g.date === ui.date);
-  const picks = day.filter(g => betOf(g, OFFICIAL));
+  const isPick = g => !!(betOf(g, OFFICIAL) || betOf(g, OFFICIAL, 'ou'));
+  const picks = day.filter(isPick);
+  const nAts = day.filter(g => betOf(g, OFFICIAL)).length, nOu = day.filter(g => betOf(g, OFFICIAL, 'ou')).length;
   const v3Ran = (S.meta.v3_dates || []).includes(ui.date) || day.some(g => g[OFFICIAL]);
   let gs = ui.filter === 'picks' ? picks : day;
-  gs = [...gs].sort((a, b) => (betOf(b, OFFICIAL) ? 1 : 0) - (betOf(a, OFFICIAL) ? 1 : 0) || (a.time || '').localeCompare(b.time || ''));
-  const season = betStats(OFFICIAL, S.games);
+  gs = [...gs].sort((a, b) => (isPick(b) ? 1 : 0) - (isPick(a) ? 1 : 0) || (a.time || '').localeCompare(b.time || ''));
+  const season = betStats(OFFICIAL, S.games), seasonOu = betStats(OFFICIAL, S.games, 'ou');
+  const tracker = (label, s) => `<div class="stat"><div class="k">${label} record</div><div class="v num">${recStr(s)}</div>
+      <div class="d">${s.pct === null ? (s.bets ? s.bets + ' pending' : 'no graded picks yet') : `${fmt(s.pct)}% · <span class="${s.units >= 0 ? 'pos' : 'neg'}">${unitsStr(s.units)}</span> · ${s.bets} bets`}</div></div>`;
   $app.innerHTML = `
     <div class="page-head"><div><h1>${ui.date === S.meta.today ? "Tonight's Picks" : 'Picks'}</h1>
       <div class="sub">${niceDate(ui.date, { weekday: 'long', month: 'long', day: 'numeric' })} · ${day.length} games · official picks are v3 bets at ${fmt((S.meta.bet_threshold || .6) * 100, 0)}%+ to cover</div></div>
       <select class="select" id="date">${dates.map(d => `<option value="${d}" ${d === ui.date ? 'selected' : ''}>${niceDate(d)}</option>`).join('')}</select></div>
     ${v3Ran ? '' : `<div class="notice">v3 picks unavailable for this day${S.meta.box_through ? ` (box-score data through ${esc(niceDate(S.meta.box_through))})` : ''}.</div>`}
     <div class="strip">
-      <div class="stat accent"><div class="k">Official picks</div><div class="v num">${picks.length}</div><div class="d">of ${day.length} games</div></div>
-      <div class="stat"><div class="k">Season record</div><div class="v num">${recStr(season)}</div><div class="d">${season.pct === null ? 'no graded picks yet' : fmt(season.pct) + '% · break-even ' + S.meta.breakeven + '%'}</div></div>
-      <div class="stat"><div class="k">Season units</div><div class="v num ${season.units >= 0 ? 'pos' : 'neg'}">${unitsStr(season.units)}</div><div class="d">${season.bets} bets · 1U each</div></div>
+      <div class="stat accent"><div class="k">Official picks</div><div class="v num">${nAts + nOu}</div><div class="d">${nAts} ATS · ${nOu} O/U</div></div>
+      ${tracker('ATS', season)}
+      ${tracker('O/U', seasonOu)}
     </div>
     <div class="controls">
       <button class="chip ${ui.filter === 'all' ? 'on' : ''}" data-f="all">All games <span class="mut">${day.length}</span></button>
@@ -203,6 +228,7 @@ function renderPicks() {
 }
 
 /* ================= MODELS (analysis of every model's bets) ================= */
+const MMK = () => (S.ui.models && S.ui.models.mk) || 'ats';   // market shown on the Models tab
 /* Every-game ATS view (secondary): how each model's lean did on every game with a line */
 function pick(g, key) {
   const m = g[key];
@@ -270,8 +296,8 @@ function unitsChart(stats) {
 /* rows of [label, test(bet)] -> table of each model's record in each bucket */
 function bucketTable(title, sub, buckets, valueLabel) {
   const cell = (key, test) => {
-    const gs = S.games.filter(g => { const b = betOf(g, key); return b && test(b); });
-    const s = betStats(key, gs);
+    const gs = S.games.filter(g => { const b = betOf(g, key, MMK()); return b && test(b); });
+    const s = betStats(key, gs, MMK());
     if (!s.bets) return '<td class="mut">—</td>';
     return `<td class="num">${recStr(s)}${s.n ? ` <span class="mut">${fmt(s.pct, 0)}%</span>` : ''}${s.pending ? ` <span class="mut">+${s.pending}</span>` : ''}
       <div class="${s.units >= 0 ? 'pos' : 'neg'} small">${s.n ? unitsStr(s.units) : ''}</div></td>`;
@@ -285,10 +311,10 @@ function calibrationPanel() {
   const buckets = [[60, 65], [65, 70], [70, 80], [80, 101]];
   const rows = buckets.map(([lo, hi]) => {
     const cells = MODELS.map(m => {
-      const gs = S.games.filter(g => { const b = betOf(g, m.key); return b && b.prob * 100 >= lo && b.prob * 100 < hi; });
-      const s = betStats(m.key, gs);
+      const gs = S.games.filter(g => { const b = betOf(g, m.key, MMK()); return b && b.prob * 100 >= lo && b.prob * 100 < hi; });
+      const s = betStats(m.key, gs, MMK());
       if (!s.n) return `<td class="mut">${s.bets ? s.bets + ' pending' : '—'}</td>`;
-      const stated = gs.filter(g => betResult(g, m.key) === 'W' || betResult(g, m.key) === 'L').reduce((a, g) => a + betOf(g, m.key).prob, 0) / s.n * 100;
+      const stated = gs.filter(g => betResult(g, m.key, MMK()) === 'W' || betResult(g, m.key, MMK()) === 'L').reduce((a, g) => a + betOf(g, m.key, MMK()).prob, 0) / s.n * 100;
       const diff = s.pct - stated;
       return `<td class="num">${fmt(s.pct, 0)}% <span class="mut">won · said ${fmt(stated, 0)}%</span>
         <div class="calib"><span class="said" style="left:${Math.min(stated, 100)}%"></span><span class="won ${diff >= 0 ? 'ok' : 'bad'}" style="width:${Math.min(s.pct, 100)}%"></span></div>
@@ -304,12 +330,12 @@ function calibrationPanel() {
 
 function disagreementsPanel() {
   const games = S.games.filter(g => {
-    const sides = MODELS.map(m => betOf(g, m.key)).filter(Boolean).map(b => b.side);
+    const sides = MODELS.map(m => betOf(g, m.key, MMK())).filter(Boolean).map(b => b.side);
     return new Set(sides).size > 1;
   }).sort((a, b) => b.date.localeCompare(a.date));
   const body = games.length ? games.map(g => `<tr><td class="num">${niceDate(g.date, { month: 'short', day: 'numeric' })}</td>
       <td><div class="teamcell">${logo(g.away, 'logo-sm')}${esc(shortName(g.away))} <span class="mut">${g.neutral ? 'vs' : '@'}</span> ${logo(g.home, 'logo-sm')}${esc(shortName(g.home))}</div></td>
-      ${MODELS.map(m => { const b = betOf(g, m.key); return `<td>${b ? `${esc(b.label)} ${g.final ? resChip(betResult(g, m.key)) : ''}` : '<span class="mut">no bet</span>'}</td>`; }).join('')}</tr>`).join('')
+      ${MODELS.map(m => { const b = betOf(g, m.key, MMK()); return `<td>${b ? `${esc(b.label)} ${g.final ? resChip(betResult(g, m.key, MMK())) : ''}` : '<span class="mut">no bet</span>'}</td>`; }).join('')}</tr>`).join('')
     : `<tr><td colspan="${2 + MODELS.length}" class="mut">No games yet where models bet opposite sides.</td></tr>`;
   return `<div class="panel"><h2>Model disagreements <small>games where two models bet opposite sides</small></h2>
     <div class="table-wrap"><table><thead><tr><th>Date</th><th>Matchup</th>${MODELS.map(m => `<th style="color:${m.color}">${m.label}</th>`).join('')}</tr></thead>
@@ -320,8 +346,8 @@ function betLog() {
   const ui = S.ui.log = S.ui.log || { model: 'all', res: 'all' };
   let rows = [];
   for (const g of S.games) for (const m of MODELS) {
-    const b = betOf(g, m.key);
-    if (b) rows.push({ g, m, b, r: betResult(g, m.key) });
+    const b = betOf(g, m.key, MMK());
+    if (b) rows.push({ g, m, b, r: betResult(g, m.key, MMK()) });
   }
   const counts = { all: rows.length, ...Object.fromEntries(MODELS.map(m => [m.key, rows.filter(x => x.m.key === m.key).length])) };
   if (ui.model !== 'all') rows = rows.filter(x => x.m.key === ui.model);
@@ -335,7 +361,7 @@ function betLog() {
       <span class="spacer"></span>
       ${[['all', 'Any result'], ['W', 'Wins'], ['L', 'Losses'], ['pending', 'Pending']].map(([k, l]) => `<button class="chip ${ui.res === k ? 'on' : ''}" data-lr="${k}">${l}</button>`).join('')}
     </div></div>
-    <div class="table-wrap"><table><thead><tr><th>Date</th><th>Model</th><th>Matchup</th><th>Bet</th><th class="r">To cover</th><th class="r">Edge</th><th>Result</th><th class="r">Units</th></tr></thead>
+    <div class="table-wrap"><table><thead><tr><th>Date</th><th>Model</th><th>Matchup</th><th>Bet</th><th class="r">Prob</th><th class="r">Edge</th><th>Result</th><th class="r">Units</th></tr></thead>
     <tbody>${rows.length ? rows.map(({ g, m, b, r }) => `<tr><td class="num">${niceDate(g.date, { month: 'short', day: 'numeric' })}</td>
       <td><b style="color:${m.color}">${m.label}</b></td>
       <td><div class="teamcell">${logo(g.away, 'logo-sm')}${esc(shortName(g.away))} <span class="mut">${g.neutral ? 'vs' : '@'}</span> ${logo(g.home, 'logo-sm')}${esc(shortName(g.home))}</div></td>
@@ -346,27 +372,34 @@ function betLog() {
 }
 
 function renderModels() {
+  const ui = S.ui.models = S.ui.models || { mk: 'ats' };
+  const mk = MMK(), M = MARKETS[mk], other = mk === 'ats' ? 'ou' : 'ats';
   const be = S.meta.breakeven || 52.4;
-  const stats = Object.fromEntries(MODELS.map(m => [m.key, betStats(m.key, S.games)]));
+  const stats = Object.fromEntries(MODELS.map(m => [m.key, betStats(m.key, S.games, MMK())]));
   const card = m => {
     const s = stats[m.key], delta = s.pct === null ? null : s.pct - be;
+    const o = betStats(m.key, S.games, other);
     return `<div class="mcard${m.key === OFFICIAL ? ' official-model' : ''}" style="--c:${m.color}">
       <div class="t"><span>${m.label}${m.key === OFFICIAL ? ' <span class="tag official-tag">OFFICIAL</span>' : ''}</span><small>${esc(m.note)}</small></div>
+      <div class="mk-label">${M.label} record</div>
       <div class="big num">${s.bets ? recStr(s) : '0-0'}</div>
       <div class="delta num ${delta === null ? 'mut' : delta >= 0 ? 'pos' : 'neg'}">${s.pct === null ? (s.bets ? 'no graded bets yet' : 'no bets yet') : `${fmt(s.pct)}% · ${sgn(delta)} vs ${be}% break-even`}</div>
       <div class="rows">
         <div><span>Units (1U per bet, −110)</span><b class="num ${s.units >= 0 ? 'pos' : 'neg'}">${unitsStr(s.units)}</b></div>
         <div><span>Return on risk</span><b class="num">${s.roi === null ? '—' : sgn(s.roi) + '%'}</b></div>
         <div><span>Bets</span><b class="num">${s.bets}${s.pending ? ` <span class="mut">(${s.pending} pending)</span>` : ''}</b></div>
-        <div><span>Avg stated cover prob</span><b class="num">${s.avgProb === null ? '—' : fmt(s.avgProb, 0) + '%'}</b></div>
+        <div><span>Avg stated probability</span><b class="num">${s.avgProb === null ? '—' : fmt(s.avgProb, 0) + '%'}</b></div>
         <div><span>Live / retroactive</span><b class="num">${s.live} / ${s.retro}</b></div>
+        <div class="other-mk"><span>${MARKETS[other].label} record</span><b class="num">${o.bets ? `${recStr(o)} · <span class="${o.units >= 0 ? 'pos' : 'neg'}">${unitsStr(o.units)}</span>` : 'no bets yet'}</b></div>
       </div></div>`;
   };
   const every = MODELS.map(m => ({ m, s: everyGameStats(m.key) }));
   $app.innerHTML = `
-    <div class="page-head"><div><h1>Models</h1><div class="sub">Each model bets games it rates ${fmt((S.meta.bet_threshold || .6) * 100, 0)}%+ to cover · records count only those bets · ${S.meta.season - 1}-${String(S.meta.season).slice(2)} season</div></div></div>
+    <div class="page-head"><div><h1>Models</h1><div class="sub">Each model bets games it rates ${fmt((S.meta.bet_threshold || .6) * 100, 0)}%+ · ATS and O/U tracked separately · records count only bets · ${S.meta.season - 1}-${String(S.meta.season).slice(2)} season</div></div>
+      ${marketToggle(ui)}</div>
+    ${mk === 'ou' ? '<div class="notice">v2 and v3 share the same predicted total (KenPom tempo formula), so their O/U bets are identical until v3 gets its own total (#23).</div>' : ''}
     <div class="models-grid">${MODELS.map(card).join('')}</div>
-    <div class="panel"><h2>Units over time <small>cumulative, bets only</small></h2><div class="body">
+    <div class="panel"><h2>${M.label} units over time <small>cumulative, bets only</small></h2><div class="body">
       <div class="legend">${MODELS.map(m => `<span><i style="background:${m.color}"></i>${m.label} <b class="num ${stats[m.key].units >= 0 ? 'pos' : 'neg'}">${unitsStr(stats[m.key].units)}</b></span>`).join('')}</div>${unitsChart(stats)}</div></div>
     ${calibrationPanel()}
     ${bucketTable('Bets by edge size', 'points between the model and the line · record, win %, +pending, units',
@@ -382,6 +415,7 @@ function renderModels() {
     <div class="mut small" style="margin-bottom:8px">RETRO = a bet applied after the fact to the prediction and line stored before tip-off. Games predicted after tip-off never count as bets. Small samples swing a lot; judge after a few hundred bets.</div>`;
   document.querySelectorAll('[data-lm]').forEach(b => b.onclick = () => { S.ui.log.model = b.dataset.lm; rerenderLog(); });
   document.querySelectorAll('[data-lr]').forEach(b => b.onclick = () => { S.ui.log.res = b.dataset.lr; rerenderLog(); });
+  document.querySelectorAll('[data-mk]').forEach(b => b.onclick = () => { ui.mk = b.dataset.mk; renderModels(); });
 }
 function rerenderLog() {
   document.getElementById('betlog').outerHTML = betLog();
@@ -522,31 +556,36 @@ function renderTeam(id) {
 
 /* ================= RESULTS (official picks) ================= */
 function renderResults() {
-  const dates = [...new Set(S.games.filter(g => betOf(g, OFFICIAL)).map(g => g.date))].sort().reverse();
-  if (!dates.length) { $app.innerHTML = '<div class="page-head"><div><h1>Results</h1></div></div><div class="empty">No official picks yet.</div>'; return; }
-  const ui = S.ui.results = S.ui.results || { date: dates[0] };
+  const ui = S.ui.results = S.ui.results || { mk: 'ats' };
+  const mk = ui.mk || 'ats', M = MARKETS[mk];
+  const dates = [...new Set(S.games.filter(g => betOf(g, OFFICIAL, mk)).map(g => g.date))].sort().reverse();
+  const head = `<div class="page-head"><div><h1>Results</h1><div class="sub">Official ${M.label} picks (v3)${dates.length ? ' · ' + niceDate(dates.includes(ui.date) ? ui.date : dates[0], { weekday: 'long', month: 'long', day: 'numeric' }) : ''} · other models on the <a href="#/models" class="link-inline">Models</a> tab</div></div>
+      <div class="controls" style="margin:0">${marketToggle(ui)}${dates.length ? `<select class="select" id="rdate">${dates.map(d => `<option value="${d}" ${d === ui.date ? 'selected' : ''}>${niceDate(d)}</option>`).join('')}</select>` : ''}</div></div>`;
+  const wire = () => document.querySelectorAll('[data-mk]').forEach(b => b.onclick = () => { ui.mk = b.dataset.mk; ui.date = null; renderResults(); });
+  if (!dates.length) { $app.innerHTML = head + `<div class="empty">No official ${M.label} picks yet.</div>`; wire(); return; }
   if (!dates.includes(ui.date)) ui.date = dates[0];
-  const gs = S.games.filter(g => g.date === ui.date && betOf(g, OFFICIAL))
+  const gs = S.games.filter(g => g.date === ui.date && betOf(g, OFFICIAL, mk))
     .sort((a, b) => (a.time || '').localeCompare(b.time || ''));
-  const day = betStats(OFFICIAL, gs), season = betStats(OFFICIAL, S.games);
-  const last7 = new Set(dates.slice(0, 7)), wk = betStats(OFFICIAL, S.games.filter(g => last7.has(g.date)));
+  const day = betStats(OFFICIAL, gs, mk), season = betStats(OFFICIAL, S.games, mk);
+  const last7 = new Set(dates.slice(0, 7)), wk = betStats(OFFICIAL, S.games.filter(g => last7.has(g.date)), mk);
   $app.innerHTML = `
-    <div class="page-head"><div><h1>Results</h1><div class="sub">Official picks (v3) · ${niceDate(ui.date, { weekday: 'long', month: 'long', day: 'numeric' })} · other models on the <a href="#/models" class="link-inline">Models</a> tab</div></div>
-      <select class="select" id="rdate">${dates.map(d => `<option value="${d}" ${d === ui.date ? 'selected' : ''}>${niceDate(d)}</option>`).join('')}</select></div>
+    ${head}
     <div class="strip">
-      <div class="stat accent"><div class="k">This day</div><div class="v num">${recStr(day)}</div><div class="d">${day.pending ? day.pending + ' pending · ' : ''}${day.n ? unitsStr(day.units) : 'not graded yet'}</div></div>
-      <div class="stat"><div class="k">Last ${last7.size} pick days</div><div class="v num">${recStr(wk)}</div><div class="d">${wk.n ? fmt(wk.pct, 0) + '% · ' + unitsStr(wk.units) : '—'}</div></div>
-      <div class="stat"><div class="k">Season record</div><div class="v num">${recStr(season)}</div><div class="d">${season.pct === null ? 'no graded picks yet' : fmt(season.pct) + '% · break-even ' + S.meta.breakeven + '%'}</div></div>
-      <div class="stat"><div class="k">Season units</div><div class="v num ${season.units >= 0 ? 'pos' : 'neg'}">${unitsStr(season.units)}</div><div class="d">${season.bets} picks · ${season.pending} pending</div></div>
+      <div class="stat accent"><div class="k">${M.label} this day</div><div class="v num">${recStr(day)}</div><div class="d">${day.pending ? day.pending + ' pending · ' : ''}${day.n ? unitsStr(day.units) : 'not graded yet'}</div></div>
+      <div class="stat"><div class="k">${M.label} last ${last7.size} pick days</div><div class="v num">${recStr(wk)}</div><div class="d">${wk.n ? fmt(wk.pct, 0) + '% · ' + unitsStr(wk.units) : '—'}</div></div>
+      <div class="stat"><div class="k">Season ${M.label} record</div><div class="v num">${recStr(season)}</div><div class="d">${season.pct === null ? 'no graded picks yet' : fmt(season.pct) + '% · break-even ' + S.meta.breakeven + '%'}</div></div>
+      <div class="stat"><div class="k">Season ${M.label} units</div><div class="v num ${season.units >= 0 ? 'pos' : 'neg'}">${unitsStr(season.units)}</div><div class="d">${season.bets} picks · ${season.pending} pending</div></div>
     </div>
-    <div class="panel"><div class="table-wrap"><table><thead><tr><th>Matchup</th><th class="r">Final</th><th>Official pick</th><th class="r">To cover</th><th class="r">Edge</th><th>Result</th><th class="r">Units</th></tr></thead><tbody>
-      ${gs.map(g => { const b = betOf(g, OFFICIAL), r = betResult(g, OFFICIAL);
+    <div class="panel"><div class="table-wrap"><table><thead><tr><th>Matchup</th><th class="r">Final</th><th>Official ${M.label} pick</th><th class="r">${mk === 'ou' ? 'Prob' : 'To cover'}</th><th class="r">Edge</th><th>Result</th><th class="r">Units</th></tr></thead><tbody>
+      ${gs.map(g => { const b = betOf(g, OFFICIAL, mk), r = betResult(g, OFFICIAL, mk);
+        const fin = g.final ? `<b>${g.final.away}-${g.final.home}</b>${mk === 'ou' ? ` <span class="mut">(${g.final.home + g.final.away})</span>` : ''}` : `<span class="mut">${esc(etTime(g.time))}</span>`;
         return `<tr><td><div class="teamcell">${logo(g.away, 'logo-sm')}${esc(shortName(g.away))} <span class="mut">${g.neutral ? 'vs' : '@'}</span> ${logo(g.home, 'logo-sm')}${esc(shortName(g.home))}</div></td>
-        <td class="r num">${g.final ? `<b>${g.final.away}-${g.final.home}</b>` : `<span class="mut">${esc(etTime(g.time))}</span>`}</td>
+        <td class="r num">${fin}</td>
         <td><b>${esc(b.label)}</b> ${retroTag(b)}</td><td class="r num">${fmt(b.prob * 100, 0)}%</td><td class="r num">${fmt(b.edge)}</td>
         <td>${resChip(r)}</td><td class="r num ${r === 'W' ? 'pos' : r === 'L' ? 'neg' : 'mut'}">${r ? unitsStr(betUnits(b, r)) : '—'}</td></tr>`; }).join('')}
     </tbody></table></div></div>`;
   document.getElementById('rdate').onchange = e => { ui.date = e.target.value; renderResults(); };
+  wire();
 }
 
 /* ---------------- boot ---------------- */

@@ -468,7 +468,7 @@ PREDICTION_HISTORY_TABLE = 'workspace.default.prediction_history'
 HISTORY_COLUMNS = ['game_date', 'game_time', 'home_team', 'away_team', 'predicted_winner', 'win_probability',
                    'predicted_home_score', 'predicted_away_score', 'confidence', 'vegas_spread', 'cover_pick',
                    'cover_confidence', 'prediction_date', 'home_adj_em', 'away_adj_em', 'home_oe', 'away_oe',
-                   'home_de', 'away_de', 'home_rank', 'away_rank'] + [c for c, _ in Betting.BET_COLUMNS] + ['vegas_total', 'neutral_site']
+                   'home_de', 'away_de', 'home_rank', 'away_rank'] + [c for c, _ in Betting.BET_COLUMNS] + ['vegas_total', 'neutral_site'] + [c for c, _ in Betting.OU_COLUMNS]
 
 
 def upload_predictions_to_databricks(predictions_df, table=PREDICTION_HISTORY_TABLE):
@@ -549,6 +549,7 @@ def upload_predictions_to_databricks(predictions_df, table=PREDICTION_HISTORY_TA
                 cursor.execute(f"ALTER TABLE {table} ADD COLUMNS ({col_def})")
             except Exception:
                 pass  # already exists
+        Betting.ensure_ou_columns(cursor, table)
 
         print("  Removing old predictions for unstarted games...")
         deleted_count = 0
@@ -600,7 +601,8 @@ def upload_predictions_to_databricks(predictions_df, table=PREDICTION_HISTORY_TA
                     {row['away_rank']},
                     {bet_sql},
                     {Betting.sql_value(row.get('vegas_total'))},
-                    {Betting.sql_value(bool(row.get('neutral_site', False)))}
+                    {Betting.sql_value(bool(row.get('neutral_site', False)))},
+                    {', '.join(Betting.sql_value(row.get(c)) for c, _ in Betting.OU_COLUMNS)}
                 )
             """)
 
@@ -679,11 +681,12 @@ def main(date=None):
                                  access_token=DATABRICKS_TOKEN)
         cursor = connection.cursor()
         bet_params = Betting.fit_for_run(cursor, run_day)
+        ou_scatter = Betting.fit_ou_for_run(cursor, run_day)
         cursor.close()
         connection.close()
     except Exception as e:
-        bet_params = Betting.SCATTER_DEFAULT
-        print(f"⚠️  Could not fit the bet scatter ({e}); using the default")
+        bet_params, ou_scatter = Betting.SCATTER_DEFAULT, Betting.OU_SCATTER_DEFAULT
+        print(f"⚠️  Could not fit the bet scatter ({e}); using the defaults")
 
     # Generate predictions for each game
     print("\n" + "="*80)
@@ -759,6 +762,9 @@ def main(date=None):
         # Bet only on a real prediction (an unmatched team leaves 0-0 scores, which would look like a huge edge)
         bet = (Betting.make_bet(home_team, away_team, predicted_margin, home_spread, bet_params)
                if features is not None else None)
+        predicted_total = prediction['predicted_home_score'] + prediction['predicted_away_score']
+        ou_bet = (Betting.make_ou_bet(predicted_total, vegas_total, ou_scatter)
+                  if features is not None else None)
 
         # Display prediction
         print(f"Predicted Winner: {prediction['predicted_winner']} ({prediction['win_probability']:.0%} confidence)")
@@ -775,6 +781,8 @@ def main(date=None):
             print(f"Vegas O/U: {vegas_total:g}  (predicted total {prediction['predicted_home_score'] + prediction['predicted_away_score']:.1f})")
         if bet:
             print(f"BET: {bet['label']}  ({bet['prob']:.0%} to cover, edge {bet['edge']:.1f}, {Betting.BET_UNITS:g}u)")
+        if ou_bet:
+            print(f"O/U BET: {ou_bet['label']}  ({ou_bet['prob']:.0%}, edge {ou_bet['edge']:.1f}, {Betting.BET_UNITS:g}u)")
         print(f"Confidence Level: {prediction['confidence']}")
         print(f"\nKey Factors:")
         for factor in prediction['key_factors']:
@@ -816,6 +824,7 @@ def main(date=None):
             **Betting.bet_fields(bet),
             'vegas_total': vegas_total,  # over/under line; None = not posted
             'neutral_site': neutral_site,  # ESPN's flag at prediction time (no home court when True)
+            **Betting.ou_fields(ou_bet),
         })
 
     # Convert to DataFrame
@@ -835,7 +844,8 @@ def main(date=None):
     print("PREDICTION SUMMARY")
     print("="*80)
     print(f"Total Games: {len(predictions_df)}")
-    print(f"Bets: {int(predictions_df['is_bet'].sum())} at {Betting.BET_THRESHOLD:.0%}+ cover probability")
+    print(f"Bets: {int(predictions_df['is_bet'].sum())} ATS, {int(predictions_df['ou_is_bet'].sum())} O/U "
+          f"at {Betting.BET_THRESHOLD:.0%}+")
     print(f"High Confidence: {len(predictions_df[predictions_df['confidence'] == 'High'])}")
     print(f"Medium Confidence: {len(predictions_df[predictions_df['confidence'] == 'Medium'])}")
     print(f"Low Confidence: {len(predictions_df[predictions_df['confidence'] == 'Low'])}")

@@ -30,6 +30,14 @@ BET_COLUMNS = [('is_bet', 'BOOLEAN'), ('bet_side', 'STRING'), ('bet_label', 'STR
                ('bet_edge', 'DOUBLE'), ('bet_prob', 'DOUBLE'), ('bet_units', 'DOUBLE'),
                ('bet_retro', 'BOOLEAN')]   # True = applied after the fact to stored pre-game numbers
 
+# Over/under bets: the same rule on totals. P(over) = Phi((predicted total - O/U line) / ou_scatter).
+OU_COLUMNS = [('ou_is_bet', 'BOOLEAN'), ('ou_side', 'STRING'), ('ou_label', 'STRING'),
+              ('ou_edge', 'DOUBLE'), ('ou_prob', 'DOUBLE'), ('ou_units', 'DOUBLE'),
+              ('ou_retro', 'BOOLEAN')]
+OU_SCATTER_DEFAULT = 16.0               # points; used until OU_SCATTER_MIN_GAMES graded totals exist
+OU_SCATTER_RANGE = (10.0, 24.0)         # safe range for the fit
+OU_SCATTER_MIN_GAMES = 150
+
 SCATTER_DEFAULT = (11.1, 0.06)          # fit on Nov 2026 games: a + b * |line|
 SCATTER_A_RANGE = (8.0, 16.0)           # safe ranges for the fit (also the search grid)
 SCATTER_B_RANGE = (0.0, 0.25)
@@ -147,6 +155,92 @@ def sql_value(v):
     if isinstance(v, str):
         return "'" + v.replace("'", "''") + "'"
     return repr(float(v))
+
+
+def make_ou_bet(predicted_total, total_line, ou_scatter, threshold=BET_THRESHOLD):
+    """
+    The model's over/under bet on one game, or None.
+    Returns {'side': 'over'|'under', 'label': 'OVER 146.5', 'edge' (points), 'prob'} or None.
+    """
+    if predicted_total is None or total_line is None or pd.isna(predicted_total) or pd.isna(total_line):
+        return None
+    total_line = float(total_line)
+    edge = float(predicted_total) - total_line
+    p_over = _phi(edge / ou_scatter)
+    if p_over >= threshold:
+        side, prob = 'over', p_over
+    elif 1 - p_over >= threshold:
+        side, prob = 'under', 1 - p_over
+    else:
+        return None
+    return {'side': side, 'label': f"{side.upper()} {total_line:g}", 'edge': round(abs(edge), 1), 'prob': round(prob, 4)}
+
+
+def ou_fields(bet, retro=False):
+    """O/U column values for one prediction row (no bet -> ou_is_bet False and NULLs)."""
+    if bet is None:
+        return {'ou_is_bet': False, 'ou_side': None, 'ou_label': None,
+                'ou_edge': None, 'ou_prob': None, 'ou_units': None, 'ou_retro': None}
+    return {'ou_is_bet': True, 'ou_side': bet['side'], 'ou_label': bet['label'], 'ou_edge': bet['edge'],
+            'ou_prob': bet['prob'], 'ou_units': BET_UNITS, 'ou_retro': bool(retro)}
+
+
+def load_graded_totals(cursor, season_start):
+    """Graded games with a pre-game O/U line, for fit_ou_scatter: game_date, total_line, actual_total."""
+    cursor.execute(f"""
+        SELECT o.game_date, h.vegas_total AS total_line,
+               o.actual_home_score + o.actual_away_score AS actual_total,
+               h.prediction_date, h.game_time
+        FROM workspace.default.prediction_outcomes o
+        JOIN workspace.default.prediction_history h
+          ON h.game_date = o.game_date AND h.home_team = o.home_team AND h.away_team = o.away_team
+        WHERE o.game_date >= '{season_start}'
+          AND h.vegas_total IS NOT NULL
+          AND NOT (o.actual_home_score = 0 AND o.actual_away_score = 0)
+    """)
+    df = cursor.fetchall_arrow().to_pandas()
+    df = df[predicted_before_tip(df['prediction_date'], df['game_time'])]
+    df['game_date'] = pd.to_datetime(df['game_date'])
+    return df[['game_date', 'total_line', 'actual_total']].reset_index(drop=True)
+
+
+def fit_ou_scatter(graded, day):
+    """
+    How far final totals land from the O/U line (one number, points), fit on games graded before `day`:
+    last SCATTER_WINDOW_DAYS days, else the season, else OU_SCATTER_DEFAULT. Returns (scatter, description).
+    """
+    day = pd.Timestamp(day)
+    hist = graded[graded['game_date'] < day]
+    recent = hist[hist['game_date'] >= day - pd.Timedelta(days=SCATTER_WINDOW_DAYS)]
+    if len(recent) >= OU_SCATTER_MIN_GAMES:
+        sample, source = recent, f"{len(recent)} games, last {SCATTER_WINDOW_DAYS} days"
+    elif len(hist) >= OU_SCATTER_MIN_GAMES:
+        sample, source = hist, f"{len(hist)} games, season to date"
+    else:
+        return OU_SCATTER_DEFAULT, f"default ({len(hist)} graded totals < {OU_SCATTER_MIN_GAMES})"
+    miss = (sample['actual_total'] - sample['total_line']).to_numpy(dtype=float)
+    fit = float(np.sqrt(np.mean(miss ** 2)))          # maximum-likelihood width for a curve centred on the line
+    scatter = round(min(OU_SCATTER_RANGE[1], max(OU_SCATTER_RANGE[0], fit)), 1)
+    return scatter, f"{source}{'' if scatter == round(fit, 1) else f', clamped from {fit:.1f}'}"
+
+
+def fit_ou_for_run(cursor, day):
+    """Load graded totals and fit the O/U scatter for a prediction run on `day`. Never raises."""
+    try:
+        scatter, source = fit_ou_scatter(load_graded_totals(cursor, season_start_for(day)), day)
+    except Exception as e:
+        scatter, source = OU_SCATTER_DEFAULT, f"default (fit failed: {type(e).__name__}: {e})"
+    print(f"  O/U scatter: {scatter:.1f} pts ({source}); betting O/U at {BET_THRESHOLD:.0%}, {BET_UNITS:g}u each")
+    return scatter
+
+
+def ensure_ou_columns(cursor, table):
+    """Add the O/U line and O/U bet columns to `table` if missing."""
+    for name, kind in [('vegas_total', 'DOUBLE')] + OU_COLUMNS:
+        try:
+            cursor.execute(f"ALTER TABLE {table} ADD COLUMNS ({name} {kind})")
+        except Exception:
+            pass
 
 
 def ensure_bet_columns(cursor, table):

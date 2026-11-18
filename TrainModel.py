@@ -491,6 +491,27 @@ def fetch_spreads_from_history(game_date):
         return {}
 
 
+def fetch_totals_from_history(game_date):
+    """O/U lines for today's games from prediction_history (saved by GamePredictions.py), either team order."""
+    try:
+        conn = db_connect()
+        cursor = conn.cursor()
+        cursor.execute(f"""
+            SELECT home_team, away_team, vegas_total
+            FROM workspace.default.prediction_history
+            WHERE game_date = '{game_date}' AND vegas_total IS NOT NULL
+        """)
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
+    except Exception:
+        return {}
+    totals = {(name_key(r[0]), name_key(r[1])): float(r[2]) for r in rows}
+    for (h, a), t in list(totals.items()):
+        totals.setdefault((a, h), t)          # a total is the same whichever team is listed home
+    return totals
+
+
 def fetch_todays_games():
     today = datetime.now(EASTERN).strftime('%Y%m%d')
     today_date = today[:4] + '-' + today[4:6] + '-' + today[6:]
@@ -558,7 +579,8 @@ def upcoming_feature_rows(games, ratings_df, state):
                                 avg_o=ratings_df['adj_o'].mean(), avg_tempo=ratings_df['tempo'].mean())
 
 
-def generate_predictions(models, games, ratings_df, state, spreads=None, bet_params=Betting.SCATTER_DEFAULT):
+def generate_predictions(models, games, ratings_df, state, spreads=None, bet_params=Betting.SCATTER_DEFAULT,
+                         totals=None, ou_scatter=Betting.OU_SCATTER_DEFAULT):
     if not models or not games:
         return []
     margin = models.get('margin_model')
@@ -573,10 +595,11 @@ def generate_predictions(models, games, ratings_df, state, spreads=None, bet_par
     pred_totals = (total['model'].predict(X[total['features']]) if PUBLISH_ML_TOTAL
                    else X['kp_total_est'].values)
     return build_records(X, pred_margins, pred_totals, spreads, margin.get('version', 'unknown'),
-                         bet_params=bet_params)
+                         bet_params=bet_params, totals=totals, ou_scatter=ou_scatter)
 
 
-def build_records(X, pred_margins, pred_totals, spreads, version, extras=None, bet_params=Betting.SCATTER_DEFAULT):
+def build_records(X, pred_margins, pred_totals, spreads, version, extras=None, bet_params=Betting.SCATTER_DEFAULT,
+                  totals=None, ou_scatter=Betting.OU_SCATTER_DEFAULT):
     """
     Prediction rows for upload. extras: optional list of dicts merged into each record.
     Each row also carries the model's bet (Betting.make_bet on the stored, rounded margin).
@@ -603,6 +626,8 @@ def build_records(X, pred_margins, pred_totals, spreads, version, extras=None, b
 
         # Bet on the margin as stored (rounded), the same number grading uses
         bet = Betting.make_bet(game['home_team'], game['away_team'], round(pred_margin, 1), spread, bet_params)
+        total_line = (totals or {}).get((name_key(game['home_team']), name_key(game['away_team'])))
+        ou_bet = Betting.make_ou_bet(round(pred_total, 1), total_line, ou_scatter)
 
         records.append({
             'game_date':               game['game_date'],
@@ -617,13 +642,16 @@ def build_records(X, pred_margins, pred_totals, spreads, version, extras=None, b
             'vegas_spread':            spread,
             'ats_confidence':          ats_conf,
             'neutral_site':            bool(game.get('neutral_site', False)),   # ESPN flag at prediction time
+            'vegas_total':             total_line,                              # O/U line; None = not posted
             **Betting.bet_fields(bet),
+            **Betting.ou_fields(ou_bet),
             **extra,
         })
     return records
 
 
-def run_v3(models, df_v2, games_today, ratings_df, state, spreads, bet_params=Betting.SCATTER_DEFAULT):
+def run_v3(models, df_v2, games_today, ratings_df, state, spreads, bet_params=Betting.SCATTER_DEFAULT,
+           totals=None, ou_scatter=Betting.OU_SCATTER_DEFAULT):
     """
     v3 = box-score ratings model blended with the v2 KenPom model (see ModelV3.py).
     Any failure (e.g. box-score data unavailable) skips v3 with an Actions warning; v2 is unaffected.
@@ -673,7 +701,8 @@ def run_v3(models, df_v2, games_today, ratings_df, state, spreads, bet_params=Be
         extras = [{'box_margin': round(float(b), 1), 'kp_margin': round(float(k), 1), 'box_share': round(float(s), 3)}
                   for b, k, s in zip(bx, kp, share)]
         return build_records(Xb, blended, Xb['kp_total_est'].values, spreads,
-                             f"v3_{datetime.now().strftime('%Y%m%d')}", extras, bet_params=bet_params)
+                             f"v3_{datetime.now().strftime('%Y%m%d')}", extras, bet_params=bet_params,
+                             totals=totals, ou_scatter=ou_scatter)
     except Exception as e:
         print(f"::warning::v3 skipped ({type(e).__name__}: {e}); v2 predictions unaffected")
         return []
@@ -719,13 +748,16 @@ def upload_predictions(records, family=MODEL_FAMILY, table=PREDICTIONS_TABLE):
             except Exception:
                 pass
         Betting.ensure_bet_columns(cursor, table)
+        Betting.ensure_ou_columns(cursor, table)
 
         # One source row per game (v2 and v3 are stored side by side, matched by family).
         # Team names are compared with apostrophes stripped: stored names have lost them
         # (see name_key), and the same escaping is used here so new rows match old ones.
         num = lambda v: 'NULL' if v is None else v
-        bet_names = [c for c, _ in Betting.BET_COLUMNS]
-        bet_casts = ', '.join(f"CAST({c} AS {kind}) AS {c}" for c, kind in Betting.BET_COLUMNS)
+        # Spread bet columns, the O/U line and the O/U bet columns travel together through the MERGE
+        extra_cols = Betting.BET_COLUMNS + [('vegas_total', 'DOUBLE')] + Betting.OU_COLUMNS
+        bet_names = [c for c, _ in extra_cols]
+        bet_casts = ', '.join(f"CAST({c} AS {kind}) AS {c}" for c, kind in extra_cols)
         rows, seen = [], set()
         for rec in records:
             key = (rec['game_date'], name_key(rec['home_team']), name_key(rec['away_team']))
@@ -858,19 +890,23 @@ def main():
     today_date = games_today[0]['game_date'] if games_today else datetime.now(EASTERN).strftime('%Y-%m-%d')
     spreads = fetch_spreads_from_history(today_date)
     print(f"  Loaded spreads for {len(spreads)} games from prediction_history")
+    totals = fetch_totals_from_history(today_date)
+    print(f"  Loaded O/U lines for {len(totals) // 2} games from prediction_history")
     try:
         conn = db_connect(); cursor = conn.cursor()
         bet_params = Betting.fit_for_run(cursor, today_date)
+        ou_scatter = Betting.fit_ou_for_run(cursor, today_date)
         cursor.close(); conn.close()
     except Exception as e:
-        bet_params = Betting.SCATTER_DEFAULT
-        print(f"  Could not fit the bet scatter ({e}); using the default")
+        bet_params, ou_scatter = Betting.SCATTER_DEFAULT, Betting.OU_SCATTER_DEFAULT
+        print(f"  Could not fit the bet scatter ({e}); using the defaults")
     prediction_records = generate_predictions(models, games_today, ratings_df, state, spreads=spreads,
-                                              bet_params=bet_params)
+                                              bet_params=bet_params, totals=totals, ou_scatter=ou_scatter)
     upload_predictions(prediction_records)
 
     # 6b. v3 (box-score ratings + KenPom blend), published alongside v2
-    v3_records = run_v3(models, df, games_today, ratings_df, state, spreads, bet_params=bet_params)
+    v3_records = run_v3(models, df, games_today, ratings_df, state, spreads, bet_params=bet_params,
+                        totals=totals, ou_scatter=ou_scatter)
     import ModelV3
     upload_predictions(v3_records, family=ModelV3.MODEL_FAMILY)
     if v3_records:
