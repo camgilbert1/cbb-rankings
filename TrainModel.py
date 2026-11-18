@@ -199,13 +199,18 @@ def sync_current_season(ratings_df):
                     delete_where=f"season = {CURRENT_SEASON} AND game_date BETWEEN '{start}' AND '{yesterday}'")
 
 
-def load_games():
-    """All completed games (every season, including non-D1 rows) from FEATURE_TABLE."""
+# Live training starts at this season. 2021-22 / 2022-23 rows are in FEATURE_TABLE for research only (added
+# Nov 18 2026); they stay out of the live model, and out of Elo's history, until a backtest earns them a place.
+FIRST_TRAIN_SEASON = 2024
+
+
+def load_games(first_season=FIRST_TRAIN_SEASON):
+    """All completed games from first_season on (including non-D1 rows) from FEATURE_TABLE."""
     print("Loading game features...")
     try:
         conn = db_connect()
         cursor = conn.cursor()
-        cursor.execute(f"SELECT * FROM {FEATURE_TABLE} WHERE actual_home_score IS NOT NULL")
+        cursor.execute(f"SELECT * FROM {FEATURE_TABLE} WHERE actual_home_score IS NOT NULL AND season >= {int(first_season)}")
         df = cursor.fetchall_arrow().to_pandas()
         cursor.close()
         conn.close()
