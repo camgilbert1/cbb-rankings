@@ -169,7 +169,8 @@ function gameCard(g) {
     const ou = g.total_line === null || g.total_line === undefined ? null : g.total_line;
     detail = `<div class="v3line"><span><b style="color:var(--violet)">v3</b> ${esc(fav)} by ${fmt(Math.abs(v3.margin))}</span>
       <span class="mut num">${edge === null ? 'no line' : 'edge ' + fmt(edge)}${bet ? '' : ' · no bet'}</span></div>
-      <div class="v3line totals"><span>Total <b class="num" style="color:var(--violet)">${predTotal === null ? '—' : fmt(predTotal, 0)}</b> predicted</span>
+      <div class="v3line totals"><span>Total <b class="num" style="color:var(--violet)">${predTotal === null ? '—' : fmt(predTotal, 0)}</b> predicted${v3.box_total !== null && v3.box_total !== undefined && v3.kp_total !== null && v3.kp_total !== undefined
+        ? ` <span class="mut small">(KenPom ${fmt(v3.kp_total, 0)} · box ${fmt(v3.box_total, 0)})</span>` : ''}</span>
       <span class="mut num">${ou === null ? 'O/U line not posted' : 'O/U ' + fmt(ou, 1).replace(/\.0$/, '')}${ou === null || ouBet ? '' : ' · no bet'}</span></div>`;
   }
   let banner = '';
@@ -397,7 +398,7 @@ function renderModels() {
   $app.innerHTML = `
     <div class="page-head"><div><h1>Models</h1><div class="sub">Each model bets games it rates ${fmt((S.meta.bet_threshold || .6) * 100, 0)}%+ · ATS and O/U tracked separately · records count only bets · ${S.meta.season - 1}-${String(S.meta.season).slice(2)} season</div></div>
       ${marketToggle(ui)}</div>
-    ${mk === 'ou' ? '<div class="notice">v2 and v3 share the same predicted total (KenPom tempo formula), so their O/U bets are identical until v3 gets its own total (#23).</div>' : ''}
+    ${mk === 'ou' ? '<div class="notice">Totals: v3 = 75% KenPom tempo formula + 25% our box-score total (bias-corrected daily); v2 = KenPom tempo formula; Formula = KenPom formula with home court added to the home score.</div>' : ''}
     <div class="models-grid">${MODELS.map(card).join('')}</div>
     <div class="panel"><h2>${M.label} units over time <small>cumulative, bets only</small></h2><div class="body">
       <div class="legend">${MODELS.map(m => `<span><i style="background:${m.color}"></i>${m.label} <b class="num ${stats[m.key].units >= 0 ? 'pos' : 'neg'}">${unitsStr(stats[m.key].units)}</b></span>`).join('')}</div>${unitsChart(stats)}</div></div>

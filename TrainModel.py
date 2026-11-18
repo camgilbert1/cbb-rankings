@@ -698,9 +698,24 @@ def run_v3(models, df_v2, games_today, ratings_df, state, spreads, bet_params=Be
         bx = box_model.predict(Xb[V3.BOX_FEATURES])
         share = trust(Xb['box_min_gp'].values)
         blended = share * bx + (1 - share) * kp
-        extras = [{'box_margin': round(float(b), 1), 'kp_margin': round(float(k), 1), 'box_share': round(float(s), 3)}
-                  for b, k, s in zip(bx, kp, share)]
-        return build_records(Xb, blended, Xb['kp_total_est'].values, spreads,
+
+        # v3's own total: 75% KenPom tempo formula + 25% bias-corrected box-score total model.
+        # Separate from the margin; any failure here falls back to the KenPom total for this run only.
+        kp_tot = Xb['kp_total_est'].values.astype(float)
+        try:
+            total_model = V3.fit_box_total_model(df, weights, XGBOOST_PARAMS)
+            bias, n_bias = V3.total_bias(total_model, df, CURRENT_SEASON)
+            box_tot = total_model.predict(Xb[V3.BOX_TOTAL_FEATURES]) - bias
+            v3_tot = V3.BOX_TOTAL_SHARE * box_tot + (1 - V3.BOX_TOTAL_SHARE) * kp_tot
+            print(f"  v3 total: {1 - V3.BOX_TOTAL_SHARE:.0%} KenPom formula + {V3.BOX_TOTAL_SHARE:.0%} box-score total "
+                  f"(box bias {bias:+.2f} pts on {n_bias} recent games, subtracted)")
+        except Exception as e:
+            box_tot, v3_tot = [None] * len(Xb), kp_tot
+            print(f"::warning::v3 own total unavailable ({type(e).__name__}: {e}); using the KenPom total this run")
+        extras = [{'box_margin': round(float(b), 1), 'kp_margin': round(float(k), 1), 'box_share': round(float(s), 3),
+                   'box_total': None if bt is None else round(float(bt), 1), 'kp_total': round(float(kt), 1)}
+                  for b, k, s, bt, kt in zip(bx, kp, share, box_tot, kp_tot)]
+        return build_records(Xb, blended, v3_tot, spreads,
                              f"v3_{datetime.now().strftime('%Y%m%d')}", extras, bet_params=bet_params,
                              totals=totals, ou_scatter=ou_scatter)
     except Exception as e:
@@ -749,13 +764,19 @@ def upload_predictions(records, family=MODEL_FAMILY, table=PREDICTIONS_TABLE):
                 pass
         Betting.ensure_bet_columns(cursor, table)
         Betting.ensure_ou_columns(cursor, table)
+        for col_def in ("box_total DOUBLE", "kp_total DOUBLE"):
+            try:
+                cursor.execute(f"ALTER TABLE {table} ADD COLUMNS ({col_def})")
+            except Exception:
+                pass
 
         # One source row per game (v2 and v3 are stored side by side, matched by family).
         # Team names are compared with apostrophes stripped: stored names have lost them
         # (see name_key), and the same escaping is used here so new rows match old ones.
         num = lambda v: 'NULL' if v is None else v
         # Spread bet columns, the O/U line and the O/U bet columns travel together through the MERGE
-        extra_cols = Betting.BET_COLUMNS + [('vegas_total', 'DOUBLE')] + Betting.OU_COLUMNS
+        extra_cols = Betting.BET_COLUMNS + [('vegas_total', 'DOUBLE')] + Betting.OU_COLUMNS \
+                     + [('box_total', 'DOUBLE'), ('kp_total', 'DOUBLE')]   # v3 total components (NULL for v2)
         bet_names = [c for c, _ in extra_cols]
         bet_casts = ', '.join(f"CAST({c} AS {kind}) AS {c}" for c, kind in extra_cols)
         rows, seen = [], set()

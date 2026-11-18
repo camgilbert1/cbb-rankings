@@ -56,6 +56,30 @@ def merge_frames(v2, box, name_key, verbose=True):
     return m
 
 
+# v3's own total: blend the KenPom tempo-formula total with a box-score total model (our pace + efficiency),
+# the same 25/75 pattern as the margin. The box total runs high this season, so its bias on this season's
+# graded games is measured each run and subtracted. The margin is unaffected (separate prediction).
+BOX_TOTAL_FEATURES = ['box_total_est', 'exp_poss', 'exp_h_eff', 'exp_a_eff', 'mu_eff', 'home_court', 'box_min_gp'] \
+                     + FOUR_FACTOR_FEATURES      # 'box ML total + 4F' in EvaluateBoxModel.py
+BOX_TOTAL_SHARE = 0.25
+TOTAL_BIAS_DAYS = 30
+
+
+def fit_box_total_model(df, weights, xgb_params):
+    m = XGBRegressor(**xgb_params)
+    m.fit(df[BOX_TOTAL_FEATURES], df['total'], sample_weight=weights)
+    return m
+
+
+def total_bias(model, df, current_season):
+    """Mean (predicted - actual) total of the box total model on this season's last TOTAL_BIAS_DAYS days."""
+    cur = df[df['season'] == current_season]
+    if cur.empty:
+        return 0.0, 0
+    cur = cur[cur['game_date'] >= cur['game_date'].max() - pd.Timedelta(days=TOTAL_BIAS_DAYS)]
+    return float(np.mean(model.predict(cur[BOX_TOTAL_FEATURES]) - cur['total'].values)), len(cur)
+
+
 def fit_box_model(df, weights, xgb_params):
     m = XGBRegressor(**xgb_params)
     m.fit(df[BOX_FEATURES], df['margin'], sample_weight=weights)
