@@ -180,9 +180,90 @@ BRACKETMATRIX_TO_KENPOM = {
 }
 
 
+from d1_teams import D1_TEAMS, ESPN_IDS, ODDS_NAMES
+
+
+def _name_key(name):
+    """Comparison key: apostrophes/okina dropped (Databricks loses them), case and spacing ignored."""
+    for ch in ("'", "’", "ʻ", "‘"):
+        name = name.replace(ch, '')
+    return ' '.join(name.lower().split())
+
+
+# ESPN display name key -> KenPom names it has been listed as, newest season first
+_D1_INDEX = {}
+for _season in sorted(D1_TEAMS, reverse=True):
+    for _espn, _kp in D1_TEAMS[_season].items():
+        _names = _D1_INDEX.setdefault(_name_key(_espn), [])
+        if _kp not in _names:
+            _names.append(_kp)
+
+
 def find_team_match(espn_name, team_stats):
     """
-    Match ESPN team name to KenPom team name.
+    KenPom name for an ESPN team, or None if the school is not D1.
+
+    Strict lookup in the validated D1 table (d1_teams.py): no fuzzy matching, so a small school can
+    never borrow a D1 team's ratings (the old matcher sent Delaware State to Delaware, UConn to Central
+    Connecticut, Colorado Christian to Colorado). Returns the first of the school's KenPom names (newest
+    season first) present in team_stats, compared apostrophe-insensitively.
+    """
+    candidates = _D1_INDEX.get(_name_key(espn_name or ''))
+    if not candidates:
+        return None
+    names = team_stats['team_name'].values
+    by_key = {_name_key(n): n for n in names}
+    for kp in candidates:
+        hit = by_key.get(_name_key(kp))
+        if hit is not None:
+            return hit
+    return None
+
+
+def validate_d1_table(team_stats, label='KenPom'):
+    """
+    Warn (GitHub Actions ::warning::) about KenPom teams no ESPN school in the D1 table maps to,
+    e.g. a new D1 program or a KenPom rename. Returns the list of uncovered KenPom names.
+    """
+    covered = {_name_key(kp) for names in _D1_INDEX.values() for kp in names}
+    missing = sorted(n for n in team_stats['team_name'].values if _name_key(n) not in covered)
+    if missing:
+        print(f"::warning::{len(missing)} {label} team(s) have no ESPN school in d1_teams.py "
+              f"(they get no predictions until added): {missing}")
+    return missing
+
+
+_ODDS_BY_KEY = {_name_key(espn): odds for espn, odds in ODDS_NAMES.items()}
+_KNOWN_ODDS = set(ODDS_NAMES.values())
+
+
+def odds_name_for(espn_name, vegas_spreads=None):
+    """
+    The Odds API name for an ESPN team, from the master table (d1_teams.ODDS_NAMES). No guessing: a team
+    not in the table only matches if the Odds API uses the exact same name; otherwise None (no line, so
+    no bet), which is safer than a guessed name putting a line on the wrong game.
+    """
+    odds = _ODDS_BY_KEY.get(_name_key(espn_name or ''))
+    if odds:
+        return odds
+    if vegas_spreads is not None and espn_name in vegas_spreads:
+        return espn_name
+    return None
+
+
+def unmapped_odds_teams(vegas_spreads):
+    """Odds API team names in today's feed that the master table doesn't know (logged as a warning)."""
+    unknown = sorted(t for t in vegas_spreads if t not in _KNOWN_ODDS)
+    if unknown:
+        print(f"::warning::{len(unknown)} Odds API team name(s) not in d1_teams.ODDS_NAMES "
+              f"(their games get no line until added): {unknown}")
+    return unknown
+
+
+def legacy_find_team_match(espn_name, team_stats):
+    """
+    OLD fuzzy matcher, kept only to regenerate/compare d1_teams.py. Do not use for predictions:
+    its first-word and substring fallbacks map non-D1 schools (and some D1 schools) onto other teams.
 
     Args:
         espn_name (str): Full team name from ESPN (e.g., "Michigan Wolverines")

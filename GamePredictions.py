@@ -26,7 +26,7 @@ DATABRICKS_TOKEN = os.getenv("DATABRICKS_TOKEN")
 ODDS_API_KEY = os.getenv("ODDS_API_KEY")
 DAY_START_HOUR_ET = 4   # betting day boundary for Vegas lines (see get_vegas_spreads)
 
-from team_names import find_team_match, normalize_team_name_for_odds
+from team_names import find_team_match, odds_name_for, unmapped_odds_teams, validate_d1_table
 import Betting
 
 
@@ -621,6 +621,7 @@ def main(date=None):
 
     # Get Vegas spreads
     vegas_spreads = get_vegas_spreads(date)   # date None = today (Eastern)
+    unmapped_odds_teams(vegas_spreads)        # warns about Odds API names missing from d1_teams.ODDS_NAMES
 
     # Get team statistics
     team_stats = get_team_stats_from_databricks()
@@ -631,6 +632,7 @@ def main(date=None):
 
     national_avg = team_stats['adj_offensive_efficiency'].mean()
     print(f"  National avg OE: {national_avg:.2f}")
+    validate_d1_table(team_stats)   # warns if a KenPom team has no ESPN school in d1_teams.py
 
     # Win-probability width, re-fit on graded games before the prediction date
     eastern = pytz.timezone('US/Eastern')
@@ -666,8 +668,8 @@ def main(date=None):
         print("-" * 60)
 
         # Get Vegas spread (normalize team names for Odds API lookup)
-        home_team_normalized = normalize_team_name_for_odds(home_team, vegas_spreads)
-        away_team_normalized = normalize_team_name_for_odds(away_team, vegas_spreads)
+        home_team_normalized = odds_name_for(home_team, vegas_spreads)
+        away_team_normalized = odds_name_for(away_team, vegas_spreads)
         home_spread = vegas_spreads.get(home_team_normalized)
         away_spread = vegas_spreads.get(away_team_normalized)
 

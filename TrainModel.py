@@ -27,7 +27,7 @@ from datetime import datetime, date, timedelta
 from dotenv import load_dotenv
 import pytz
 
-from team_names import find_team_match
+from team_names import find_team_match, validate_d1_table
 import Betting
 from BackfillHistoricalData import (FEATURE_TABLE, fetch_espn_games_for_date, team_ratings,
                                     upload_features)
@@ -811,6 +811,7 @@ def main():
     if ratings_df.empty:
         print("Could not load ratings. Exiting.")
         return
+    validate_d1_table(ratings_df)   # warns if a KenPom team has no ESPN school in d1_teams.py
 
     # 1. Sync + load training data
     sync_current_season(ratings_df)
