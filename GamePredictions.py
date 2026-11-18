@@ -7,9 +7,10 @@ import pandas as pd
 import requests
 from databricks import sql
 import os
+import math
 from collections import Counter
 from datetime import datetime, timedelta
-from statistics import median
+from statistics import NormalDist, median
 from dotenv import load_dotenv
 import pytz
 
@@ -290,7 +291,74 @@ def calculate_matchup_features(home_team, away_team, team_stats, neutral_site=Fa
     return features
 
 
-def predict_game(home_team, away_team, features, national_avg=106.0):
+# Win probability = Phi(predicted margin / width), where width is the typical size of the Formula's
+# miss in points. The width is re-fit every run on recently graded games (see fit_win_prob_width).
+WIN_PROB_WIDTH_DEFAULT = 15.5   # fit on Nov 2026 games; used until enough games are graded
+WIN_PROB_WIDTH_MIN, WIN_PROB_WIDTH_MAX = 11.0, 18.0
+WIN_PROB_WINDOW_DAYS = 30
+WIN_PROB_MIN_GAMES = 150
+
+
+def fit_win_prob_width(graded, day):
+    """
+    Width (points) for Phi(margin / width), fit on Formula games graded before `day`.
+
+    graded: DataFrame with game_date (datetime64), margin (predicted home - away), home_won (bool)
+            for the current season.
+    Uses the last WIN_PROB_WINDOW_DAYS days if they hold WIN_PROB_MIN_GAMES games, else the whole
+    season, else the default. The fit is clamped to [WIN_PROB_WIDTH_MIN, WIN_PROB_WIDTH_MAX].
+    Returns (width, description).
+    """
+    day = pd.Timestamp(day)
+    hist = graded[graded['game_date'] < day]
+    recent = hist[hist['game_date'] >= day - pd.Timedelta(days=WIN_PROB_WINDOW_DAYS)]
+    if len(recent) >= WIN_PROB_MIN_GAMES:
+        sample, source = recent, f"{len(recent)} games, last {WIN_PROB_WINDOW_DAYS} days"
+    elif len(hist) >= WIN_PROB_MIN_GAMES:
+        sample, source = hist, f"{len(hist)} games, season to date"
+    else:
+        return WIN_PROB_WIDTH_DEFAULT, f"default ({len(hist)} graded games < {WIN_PROB_MIN_GAMES})"
+
+    # Maximum-likelihood width on a 0.1-point grid
+    phi = NormalDist().cdf
+    margins, won = sample['margin'].tolist(), sample['home_won'].tolist()
+    best_width, best_ll = None, None
+    for tenths in range(int(WIN_PROB_WIDTH_MIN * 10) - 30, int(WIN_PROB_WIDTH_MAX * 10) + 71):
+        w = tenths / 10
+        ll = sum(math.log(max(1e-9, phi(m / w) if y else 1 - phi(m / w))) for m, y in zip(margins, won))
+        if best_ll is None or ll > best_ll:
+            best_width, best_ll = w, ll
+    width = min(WIN_PROB_WIDTH_MAX, max(WIN_PROB_WIDTH_MIN, best_width))
+    note = '' if width == best_width else f", clamped from {best_width}"
+    return width, f"{source}{note}"
+
+
+def load_graded_formula_games(season_start):
+    """Current-season graded Formula games (predicted margin + result) for fit_win_prob_width."""
+    try:
+        connection = sql.connect(server_hostname=DATABRICKS_HOST, http_path=DATABRICKS_HTTP_PATH,
+                                 access_token=DATABRICKS_TOKEN)
+        cursor = connection.cursor()
+        cursor.execute(f"""
+            SELECT game_date,
+                   predicted_home_score - predicted_away_score AS margin,
+                   actual_home_score > actual_away_score AS home_won
+            FROM workspace.default.prediction_outcomes
+            WHERE game_date >= '{season_start}'
+              AND predicted_home_score > 0
+              AND actual_home_score IS NOT NULL AND actual_home_score <> actual_away_score
+        """)
+        df = cursor.fetchall_arrow().to_pandas()
+        cursor.close()
+        connection.close()
+        df['game_date'] = pd.to_datetime(df['game_date'])
+        return df
+    except Exception as e:
+        print(f"⚠️  Could not load graded games for the win-probability fit ({e}); using the default width")
+        return pd.DataFrame(columns=['game_date', 'margin', 'home_won'])
+
+
+def predict_game(home_team, away_team, features, national_avg=106.0, win_prob_width=WIN_PROB_WIDTH_DEFAULT):
     """
     Predict game outcome using efficiency-based model
 
@@ -317,14 +385,15 @@ def predict_game(home_team, away_team, features, national_avg=106.0):
     # Calculate net advantage (efficiency margin diff + home court)
     net_advantage = features['efficiency_margin_diff'] + features['home_court_advantage']
 
-    # Estimate win probability (logistic function)
-    # Roughly: 1 point of efficiency margin ≈ 3% win probability
-    win_prob = 1 / (1 + 2.718 ** (-0.03 * net_advantage))
-
     # KenPom methodology: expected score = (team_OE * opp_DE / national_avg) * (possessions / 100)
     expected_tempo = features['expected_tempo']
     predicted_home_score = (features['home_oe'] / national_avg) * (features['away_de'] / national_avg) * national_avg * (expected_tempo / 100) + features['home_court_advantage']
     predicted_away_score = (features['away_oe'] / national_avg) * (features['home_de'] / national_avg) * national_avg * (expected_tempo / 100)
+
+    # Win probability from the predicted score (as rounded for display, so the listed winner always
+    # matches the shown score): share of a normal curve around the predicted margin that lands above 0
+    predicted_margin = round(predicted_home_score, 1) - round(predicted_away_score, 1)
+    win_prob = NormalDist().cdf(predicted_margin / win_prob_width)
 
     # Determine confidence
     if abs(net_advantage) > 15:
@@ -547,6 +616,13 @@ def main(date=None):
     national_avg = team_stats['adj_offensive_efficiency'].mean()
     print(f"  National avg OE: {national_avg:.2f}")
 
+    # Win-probability width, re-fit on graded games before the prediction date
+    eastern = pytz.timezone('US/Eastern')
+    run_day = datetime.strptime(date, '%Y%m%d').date() if date else datetime.now(eastern).date()
+    season_start = f"{run_day.year if run_day.month >= 7 else run_day.year - 1}-11-01"
+    win_prob_width, width_source = fit_win_prob_width(load_graded_formula_games(season_start), run_day)
+    print(f"  Win-prob width: {win_prob_width:.1f} pts ({width_source})")
+
     # Generate predictions for each game
     print("\n" + "="*80)
     print("GENERATING PREDICTIONS")
@@ -579,7 +655,7 @@ def main(date=None):
         features = calculate_matchup_features(home_team, away_team, team_stats, neutral_site=neutral_site)
 
         # Predict
-        prediction = predict_game(home_team, away_team, features, national_avg)
+        prediction = predict_game(home_team, away_team, features, national_avg, win_prob_width)
 
         # Calculate cover pick (Against The Spread)
         predicted_margin = prediction['predicted_home_score'] - prediction['predicted_away_score']
