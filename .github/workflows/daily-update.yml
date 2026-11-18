@@ -1,10 +1,12 @@
 name: Daily Data Update
 
-# Runs every day at 11:30 AM ET (4:30 PM UTC)
+# Runs every day at 9:11 AM MST / 11:11 AM EST (16:11 UTC). Cron is UTC, so during daylight saving
+# (Mar-Nov) this is 10:11 AM MDT / 12:11 PM EDT. An odd minute avoids GitHub's :00/:30 queue, where
+# scheduled runs started 4-8 hours late in Nov 2026.
 # APIPull rebuilds the gold table on every run (falls back to existing tables if KenPom blocks the runner)
 on:
   schedule:
-    - cron: '30 16 * * *'
+    - cron: '11 16 * * *'
   workflow_dispatch:
 
 jobs:
