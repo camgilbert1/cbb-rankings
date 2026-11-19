@@ -1,12 +1,12 @@
 name: Daily Data Update
 
-# Runs every day at 9:11 AM MST / 11:11 AM EST (16:11 UTC). Cron is UTC, so during daylight saving
-# (Mar-Nov) this is 10:11 AM MDT / 12:11 PM EDT. An odd minute avoids GitHub's :00/:30 queue, where
-# scheduled runs started 4-8 hours late in Nov 2026.
+# Manual runs only (Actions -> Daily Data Update -> Run workflow). The schedule was removed Nov 18 2026:
+# GitHub started the 9:11 AM MST cron ('11 16 * * *') 4-8 hours late every day. To bring it back, restore
+#   schedule:
+#     - cron: '11 16 * * *'
+# under "on:" (or trigger workflow_dispatch from an on-time scheduler such as a Databricks job).
 # APIPull rebuilds the gold table on every run (falls back to existing tables if KenPom blocks the runner)
 on:
-  schedule:
-    - cron: '11 16 * * *'
   workflow_dispatch:
 
 jobs:
