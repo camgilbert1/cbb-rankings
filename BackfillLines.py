@@ -58,23 +58,44 @@ def season_games(season):
     return games
 
 
+CORE_ODDS = ("https://sports.core.api.espn.com/v2/sports/basketball/leagues/mens-college-basketball/"
+             "events/{eid}/competitions/{eid}/odds")
+
+
+def _parse(game, p):
+    """A line dict from one ESPN odds entry (summary pickcenter or core odds item), or None."""
+    spread, total = p.get('spread'), p.get('overUnder')
+    if spread is None and total is None:
+        return None
+    home_fav = (p.get('homeTeamOdds') or {}).get('favorite')
+    away_fav = (p.get('awayTeamOdds') or {}).get('favorite')
+    if spread is not None:
+        mag = abs(float(spread))
+        # Anchor the sign to ESPN's favorite flags: home favored -> negative home spread
+        home_spread = 0.0 if mag == 0 else (-mag if home_fav else mag if away_fav else None)
+    else:
+        home_spread = None
+    return {**game, 'home_spread': home_spread, 'total_line': float(total) if total is not None else None,
+            'provider': (p.get('provider') or {}).get('name'), 'details': p.get('details')}
+
+
 def line_for(game):
-    """The game's DraftKings line from its ESPN summary page (None if not kept)."""
+    """The game's pre-game line: ESPN summary page (DraftKings, 2025-26 on); for older seasons, ESPN's
+    detailed odds feed (ESPN BET in 2024-25), skipping live in-game providers. None if not kept."""
     js = get(SM, {'event': game['event_id']}) or {}
     for p in js.get('pickcenter') or []:
-        spread, total = p.get('spread'), p.get('overUnder')
-        if spread is None and total is None:
+        line = _parse(game, p)
+        if line:
+            return line
+    core = get(CORE_ODDS.format(eid=game['event_id']), {}) or {}
+    for ref in core.get('items') or []:
+        p = ref if 'spread' in ref or 'overUnder' in ref else (get(ref['$ref'].replace('http://', 'https://'), {}) or {})
+        name = ((p.get('provider') or {}).get('name') or '').lower()
+        if 'live' in name:
             continue
-        home_fav = (p.get('homeTeamOdds') or {}).get('favorite')
-        away_fav = (p.get('awayTeamOdds') or {}).get('favorite')
-        if spread is not None:
-            mag = abs(float(spread))
-            # Anchor the sign to ESPN's favorite flags: home favored -> negative home spread
-            home_spread = 0.0 if mag == 0 else (-mag if home_fav else mag if away_fav else None)
-        else:
-            home_spread = None
-        return {**game, 'home_spread': home_spread, 'total_line': float(total) if total is not None else None,
-                'provider': (p.get('provider') or {}).get('name'), 'details': p.get('details')}
+        line = _parse(game, p)
+        if line:
+            return line
     return {**game, 'home_spread': None, 'total_line': None, 'provider': None, 'details': None}
 
 
