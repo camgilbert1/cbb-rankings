@@ -452,13 +452,8 @@ def main():
         upload_to_databricks(kenpom_data, "kenpom_ratings", 2027)
         rebuild_gold_table(year=2027)
 
-    # 2. Torvik T-Rank (ML FEATURE SOURCE - free API, no login)
-    torvik_data = fetch_torvik_ratings(year=2027)
-    if not torvik_data.empty:
-        torvik_file = "torvik_ratings_2027.csv"
-        torvik_data.to_csv(torvik_file, index=False)
-        print(f"\n✓ Torvik data saved to: {torvik_file}")
-        upload_torvik_to_databricks(torvik_data, 2027)
+    # Torvik pull removed Nov 19 2026: barttorvik.com blocks the runner (403) and no model used it.
+    # fetch_torvik_ratings / upload_torvik_to_databricks are kept below in case access ever returns.
 
     # =============================================================================
     # SUMMARY
