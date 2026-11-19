@@ -463,7 +463,6 @@ def main():
     print("DATA COLLECTION SUMMARY:")
     print("="*80)
     print(f"KenPom Teams: {len(kenpom_data)}")
-    print(f"Torvik Teams: {len(torvik_data) if not torvik_data.empty else 0}")
     print("\nData sources fetched successfully!")
 
     return kenpom_data
