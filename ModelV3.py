@@ -28,7 +28,10 @@ FOUR_FACTOR_FEATURES = [f'exp_{s}_{m}' for s in 'ha' for m in B.FOUR_FACTORS]
 # 2025-26 backtest, v3 margin RMSE 11.525 -> 11.515 (DraftKings ~11.17).
 # Our own point-in-time Elo (Elo.py) added to BOTH halves Nov 18 2026: honest v3 RMSE 11.515 -> 11.503 (test
 # 2025-26), 11.405 -> 11.390 (test 2024-25). v3's KenPom half = v2's features + these, trained separately from v2.
-KP_EXTRA_FEATURES = ['elo_diff']
+# Player availability change (PlayerAvailability.py) added to both halves Nov 19 2026: honest v3 RMSE
+# 11.503 -> 11.482 (test 2025-26), 11.390 -> 11.385 (test 2024-25).
+AVAIL_FEATURES = ['home_chg_gs_last', 'away_chg_gs_last', 'chg_gs_last_diff']
+KP_EXTRA_FEATURES = ['elo_diff'] + AVAIL_FEATURES
 BOX_FEATURES = ['box_margin_est', 'box_em_diff', 'exp_h_eff', 'exp_a_eff', 'exp_poss_rel',
                 'prior_em_diff', 'home_court', 'home_rest', 'away_rest', 'box_min_gp'] + FOUR_FACTOR_FEATURES \
                + KP_EXTRA_FEATURES
@@ -59,7 +62,22 @@ def merge_frames(v2, box, name_key, verbose=True):
     for c in val_cols:
         if m[c].dtype == object:
             m[c] = pd.to_numeric(m[c], errors='coerce')
-    return m
+    return add_availability(m, verbose)
+
+
+def add_availability(m, verbose=True):
+    """Player availability change (PlayerAvailability.py) for every game; 0 (= no change) if unavailable."""
+    import PlayerAvailability as PA
+    try:
+        seasons = sorted(int(s) for s in m['season'].dropna().unique())
+        paths = B.download_box(seasons, datasets=('player_game_logs',))
+        return PA.attach(m, {s: paths[('player_game_logs', s)] for s in seasons})
+    except Exception as e:
+        print(f"::warning::player availability unavailable ({type(e).__name__}: {e}); using 0 (no change)")
+        m = m.copy()
+        for f in PA.FEATURES:
+            m[f] = 0.0
+        return m
 
 
 # v3's own total: blend the KenPom tempo-formula total with a box-score total model (our pace + efficiency),

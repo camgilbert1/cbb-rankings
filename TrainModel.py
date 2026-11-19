@@ -718,6 +718,16 @@ def run_v3(models, df_v2, games_today, ratings_df, state, spreads, bet_params=Be
         Xb = B.upcoming_rows(X.to_dict('records'), bstate)
         if Xb.empty:
             return []
+        import PlayerAvailability as PA
+        try:      # who sat each team's most recent game vs. who usually plays (0 = no change on failure)
+            logs = B.download_box([CURRENT_SEASON], current_season=CURRENT_SEASON, datasets=('player_game_logs',))
+            Xb = PA.attach_upcoming(Xb, logs[('player_game_logs', CURRENT_SEASON)])
+            big = Xb.loc[Xb[['home_chg_gs_last', 'away_chg_gs_last']].abs().max(axis=1) >= 8]
+            print(f"  Player availability attached; {len(big)} game(s) with a big lineup change since the last game")
+        except Exception as e:
+            for f in PA.FEATURES:
+                Xb[f] = 0.0
+            print(f"::warning::player availability unavailable for today ({type(e).__name__}: {e}); using 0")
         skipped = len(X) - len(Xb)
         if skipped:
             print(f"  {skipped} game(s) skipped — team not in box-score ratings yet")
