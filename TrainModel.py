@@ -621,7 +621,7 @@ def generate_predictions(models, games, ratings_df, state, spreads=None, bet_par
 
 
 def build_records(X, pred_margins, pred_totals, spreads, version, extras=None, bet_params=Betting.SCATTER_DEFAULT,
-                  totals=None, ou_scatter=Betting.OU_SCATTER_DEFAULT):
+                  totals=None, ou_scatter=Betting.OU_SCATTER_DEFAULT, calib=None):
     """
     Prediction rows for upload. extras: optional list of dicts merged into each record.
     Each row also carries the model's bet (Betting.make_bet on the stored, rounded margin).
@@ -647,7 +647,8 @@ def build_records(X, pred_margins, pred_totals, spreads, version, extras=None, b
             ats_conf = 'Low'
 
         # Bet on the margin as stored (rounded), the same number grading uses
-        bet = Betting.make_bet(game['home_team'], game['away_team'], round(pred_margin, 1), spread, bet_params)
+        bet = Betting.make_bet(game['home_team'], game['away_team'], round(pred_margin, 1), spread, bet_params,
+                               calib=calib)
         total_line = (totals or {}).get((name_key(game['home_team']), name_key(game['away_team'])))
         ou_bet = Betting.make_ou_bet(round(pred_total, 1), total_line, ou_scatter)
 
@@ -673,7 +674,7 @@ def build_records(X, pred_margins, pred_totals, spreads, version, extras=None, b
 
 
 def run_v3(models, df_v2, games_today, ratings_df, state, spreads, bet_params=Betting.SCATTER_DEFAULT,
-           totals=None, ou_scatter=Betting.OU_SCATTER_DEFAULT):
+           totals=None, ou_scatter=Betting.OU_SCATTER_DEFAULT, calib=Betting.CAL_SLOPE_DEFAULT):
     """
     v3 = box-score ratings model blended with the v2 KenPom model (see ModelV3.py).
     Any failure (e.g. box-score data unavailable) skips v3 with an Actions warning; v2 is unaffected.
@@ -774,7 +775,7 @@ def run_v3(models, df_v2, games_today, ratings_df, state, spreads, bet_params=Be
                   for b, k, s, bt, kt, hh, ha in zip(bx, kp, share, box_tot, kp_tot, h1_home, h1_away)]
         return build_records(Xb, blended, v3_tot, spreads,
                              f"v3_{datetime.now().strftime('%Y%m%d')}", extras, bet_params=bet_params,
-                             totals=totals, ou_scatter=ou_scatter)
+                             totals=totals, ou_scatter=ou_scatter, calib=calib)
     except Exception as e:
         print(f"::warning::v3 skipped ({type(e).__name__}: {e}); v2 predictions unaffected")
         return []
@@ -975,9 +976,11 @@ def main():
         conn = db_connect(); cursor = conn.cursor()
         bet_params = Betting.fit_for_run(cursor, today_date)
         ou_scatter = Betting.fit_ou_for_run(cursor, today_date)
+        v3_calib = Betting.fit_calibration(cursor, today_date, bet_params)
         cursor.close(); conn.close()
     except Exception as e:
         bet_params, ou_scatter = Betting.SCATTER_DEFAULT, Betting.OU_SCATTER_DEFAULT
+        v3_calib = Betting.CAL_SLOPE_DEFAULT
         print(f"  Could not fit the bet scatter ({e}); using the defaults")
     prediction_records = generate_predictions(models, games_today, ratings_df, state, spreads=spreads,
                                               bet_params=bet_params, totals=totals, ou_scatter=ou_scatter)
@@ -985,7 +988,7 @@ def main():
 
     # 6b. v3 (box-score ratings + KenPom blend), published alongside v2
     v3_records = run_v3(models, df, games_today, ratings_df, state, spreads, bet_params=bet_params,
-                        totals=totals, ou_scatter=ou_scatter)
+                        totals=totals, ou_scatter=ou_scatter, calib=v3_calib)
     import ModelV3
     upload_predictions(v3_records, family=ModelV3.MODEL_FAMILY)
     if v3_records:

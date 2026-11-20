@@ -115,18 +115,62 @@ def scatter_for(home_spread, params):
     return a + b * abs(home_spread)
 
 
-def make_bet(home_team, away_team, model_margin, home_spread, params, threshold=BET_THRESHOLD):
+# Stage 2 (v3 only, Nov 20 2026): calibrated cover probability. Phi(edge / scatter) treats every point of
+# disagreement with the line as real; in honest v3 backtests (2024-25, 2025-26 with real closing lines) a
+# claimed 64% won ~53%. Calibrated: P(home covers) = 1 / (1 + exp(-k * edge / scatter)), k fit each run by
+# logistic regression on the stored backtest pairs (v3_cover_calibration) + this season's graded v3 games.
+# Bet when the calibrated probability >= CAL_THRESHOLD (break-even at -110 is 52.4%).
+CAL_TABLE = 'workspace.default.v3_cover_calibration'
+CAL_SLOPE_DEFAULT = 0.27                # pooled fit on 10,522 backtest games; used if the fit fails
+CAL_SLOPE_RANGE = (0.0, 1.0)
+CAL_THRESHOLD = 0.54
+CAL_LIVE_START = '2026-11-12'           # first day all v3 lines were taken before tip-off
+
+
+def fit_calibration(cursor, day, params):
+    """Logistic slope k for v3's calibrated cover probability, fit on games before `day`. Never raises."""
+    try:
+        cursor.execute(f"SELECT z, covered FROM {CAL_TABLE}")
+        bt = pd.DataFrame(cursor.fetchall(), columns=['z', 'covered']).astype(float)
+        cursor.execute(f"""
+            SELECT ml_predicted_margin, vegas_spread, actual_home_score - actual_away_score
+            FROM workspace.default.ml_predictions
+            WHERE model_version LIKE 'v3_%' AND game_date >= '{CAL_LIVE_START}' AND game_date < '{pd.Timestamp(day).date()}'
+              AND vegas_spread IS NOT NULL AND actual_home_score IS NOT NULL""")
+        live = pd.DataFrame(cursor.fetchall(), columns=['pm', 'sp', 'am']).astype(float)
+        live = live[live.am + live.sp != 0]
+        live_z = (live.pm + live.sp) / (params[0] + params[1] * live.sp.abs())
+        z = np.concatenate([bt.z.values, live_z.values])
+        y = np.concatenate([bt.covered.values, (live.am + live.sp > 0).astype(float).values])
+        k = CAL_SLOPE_DEFAULT
+        for _ in range(25):                                   # Newton steps, no intercept
+            p = 1 / (1 + np.exp(-k * z))
+            k += np.sum((y - p) * z) / np.sum(p * (1 - p) * z * z)
+        k = float(np.clip(k, *CAL_SLOPE_RANGE))
+        source = f"{len(bt)} backtest + {len(live)} graded this season"
+    except Exception as e:
+        k, source = CAL_SLOPE_DEFAULT, f"default (fit failed: {type(e).__name__}: {e})"
+    print(f"  v3 calibrated cover probability: slope {k:.3f} ({source}); v3 bets at {CAL_THRESHOLD:.0%}")
+    return k
+
+
+def make_bet(home_team, away_team, model_margin, home_spread, params, threshold=BET_THRESHOLD, calib=None):
     """
     The model's bet on one game, or None.
 
     model_margin: predicted home - away. home_spread: Vegas home line (None = no line, 0 = pick 'em).
+    calib: logistic slope for the calibrated probability (v3); None = the Phi(edge / scatter) rule.
     Returns {'side': 'home'|'away', 'label', 'edge' (points toward the bet side), 'prob'} or None.
     """
     if home_spread is None or model_margin is None or pd.isna(home_spread) or pd.isna(model_margin):
         return None
     home_spread = float(home_spread) + 0.0
     edge_home = float(model_margin) + home_spread
-    p_home = _phi(edge_home / scatter_for(home_spread, params))
+    z = edge_home / scatter_for(home_spread, params)
+    if calib is None:
+        p_home = _phi(z)
+    else:
+        p_home, threshold = 1 / (1 + np.exp(-calib * z)), CAL_THRESHOLD
     if p_home >= threshold:
         side, prob, team, line = 'home', p_home, home_team, home_spread
     elif 1 - p_home >= threshold:
