@@ -74,6 +74,12 @@ def load_tables():
     except Exception as e:
         print(f"  (Kalshi 1H lines unavailable: {e})")
         t['kalshi'] = pd.DataFrame(columns=['game_date', 'home_team', 'away_team', 'h1_margin_line', 'h1_total_line'])
+    try:     # SportsGameOdds 1H lines (SGOLines.py): fill games/parts Kalshi doesn't cover
+        t['sgo'] = query(cur, f"SELECT game_date, home_team, away_team, src_spread, h1_margin_line, src_total, h1_total_line, after_tip FROM workspace.default.sgo_1h_lines WHERE game_date >= '{s}'")
+        t['sgo']['game_date'] = pd.to_datetime(t['sgo']['game_date']).dt.strftime('%Y-%m-%d')
+    except Exception as e:
+        print(f"  (SGO 1H lines unavailable: {e})")
+        t['sgo'] = pd.DataFrame(columns=['game_date', 'home_team', 'away_team', 'src_spread', 'h1_margin_line', 'src_total', 'h1_total_line', 'after_tip'])
     cur.close(); conn.close()
     for k in ('history', 'outcomes', 'results', 'ml'):
         t[k]['game_date'] = pd.to_datetime(t[k]['game_date']).dt.strftime('%Y-%m-%d')
@@ -264,10 +270,26 @@ def build_games(t, key2id, id2name, neutral, finals, slates):
     for r in t['kalshi'].itertuples(index=False):
         same, flipped = (r.game_date, nk(r.home_team), nk(r.away_team)), (r.game_date, nk(r.away_team), nk(r.home_team))
         mg, tot = clean(r.h1_margin_line), clean(r.h1_total_line)
+        k = {'margin': mg, 'total': tot, 'src_m': 'Kalshi' if mg is not None else None,
+             'src_t': 'Kalshi' if tot is not None else None, 'after_tip': False}
         if same in games:
-            games[same]['k1h'] = {'margin': mg, 'total': tot}
+            games[same]['k1h'] = k
         elif flipped in games:
-            games[flipped]['k1h'] = {'margin': None if mg is None else -mg, 'total': tot}
+            games[flipped]['k1h'] = dict(k, margin=None if mg is None else -mg)
+    # SportsGameOdds lines fill whatever part (spread / total) Kalshi didn't cover
+    for r in t['sgo'].itertuples(index=False):
+        same, flipped = (r.game_date, nk(r.home_team), nk(r.away_team)), (r.game_date, nk(r.away_team), nk(r.home_team))
+        key, sign = (same, 1) if same in games else ((flipped, -1) if flipped in games else (None, 1))
+        if key is None:
+            continue
+        mg, tot = clean(r.h1_margin_line), clean(r.h1_total_line)
+        k = games[key]['k1h'] or {'margin': None, 'total': None, 'src_m': None, 'src_t': None, 'after_tip': False}
+        tip = bool(r.after_tip) if r.after_tip is not None and not pd.isna(r.after_tip) else False
+        if k['margin'] is None and mg is not None:
+            k.update(margin=sign * mg, src_m=r.src_spread); k['after_tip'] = k['after_tip'] or tip
+        if k['total'] is None and tot is not None:
+            k.update(total=tot, src_t=r.src_total); k['after_tip'] = k['after_tip'] or tip
+        games[key]['k1h'] = k if (k['margin'] is not None or k['total'] is not None) else games[key]['k1h']
     # ESPN slate data (ids, times, live status, records) for the dates being shown live
     for sg in slates:
         k = (sg['date'], nk(sg['home']['name']), nk(sg['away']['name']))

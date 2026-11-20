@@ -91,16 +91,19 @@ jobs:
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
         run: python TrainModel.py
 
-      # Kalshi 1H spread/total lines for the 1H tab (display + grading only). Public data, no key.
-      # Skips games already started so a pre-tip line is never overwritten with in-game prices.
-      - name: Snapshot Kalshi 1H lines - display only
-        timeout-minutes: 5
+      # 1H spread/total lines for the 1H tab (display + grading only). Kalshi first (public, no key), then
+      # SportsGameOdds fills the games/parts Kalshi missed (free tier; only games still missing a line are requested).
+      - name: Snapshot 1H lines (Kalshi, then SportsGameOdds) - display only
+        timeout-minutes: 8
         continue-on-error: true
         env:
+          SGO_API_KEY: ${{ secrets.SGO_API_KEY }}
           DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
           DATABRICKS_HTTP_PATH: ${{ secrets.DATABRICKS_HTTP_PATH }}
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
-        run: python KalshiLines.py
+        run: |
+          python KalshiLines.py || echo "::warning::Kalshi 1H lines failed"
+          python SGOLines.py || echo "::warning::SportsGameOdds 1H lines failed"
 
       # Static website (site/) -> GitHub Pages. Runs even if an earlier step failed, so the site
       # still refreshes with whatever data is in Databricks.
