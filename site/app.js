@@ -314,7 +314,7 @@ function h1Card(g, showDate = false) {
 /* Kalshi 1H market line (KalshiLines.py) and our lean against it; graded once the half is final. */
 function kalshiLeans(g) {
   const k = g.k1h, v3 = g[OFFICIAL];
-  if (!k || k.after_tip || !v3 || v3.h1_home === null || v3.h1_home === undefined) return null;   // after-tip lines aren't graded
+  if (!k || !v3 || v3.h1_home === null || v3.h1_home === undefined) return null;
   const pm = v3.h1_home - v3.h1_away, pt = v3.h1_home + v3.h1_away, f = g.h1_final;
   const out = {};
   if (k.margin !== null && k.margin !== undefined && pm !== k.margin) {
@@ -337,7 +337,7 @@ function kalshiLine(g) {
     : `${esc(shortName(k.margin >= 0 ? g.home : g.away))} ${k.margin === 0 ? 'PK' : '-' + fmt(Math.abs(k.margin), 1)}`;
   const leanSp = L.spread ? `lean ${esc(shortName(L.spread.home ? g.home : g.away))} (${fmt(L.spread.edge, 1)})${tag(L.spread.result)}` : '';
   const leanTo = L.total ? `lean ${L.total.over ? 'Over' : 'Under'} (${fmt(L.total.edge, 1)})${tag(L.total.result)}` : '';
-  const note = k.after_tip ? '<span class="tag">AFTER TIP · not graded</span>' : [leanSp, leanTo].filter(Boolean).join(' · ');
+  const note = [leanSp, leanTo].filter(Boolean).join(' · ');
   return `<div class="v3line mut small"><span><b>1H line</b> ${sp ? sp + ' · ' : ''}${k.total ? 'O/U ' + fmt(k.total, 1) : ''} <span class="mut">(${esc(srcs)})</span></span>
     <span class="num">${note}</span></div>`;
 }
