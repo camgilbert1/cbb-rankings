@@ -441,7 +441,7 @@ function bucketTable(title, sub, buckets, valueLabel) {
 }
 
 function calibrationPanel() {
-  const buckets = [[52, 56], [56, 60], [60, 65], [65, 70], [70, 80], [80, 101]];
+  const buckets = [[60, 65], [65, 70], [70, 80], [80, 101]];
   const rows = buckets.map(([lo, hi]) => {
     const cells = MODELS.map(m => {
       const gs = S.games.filter(g => { const b = betOf(g, m.key, MMK()); return b && b.prob * 100 >= lo && b.prob * 100 < hi; });
@@ -458,7 +458,7 @@ function calibrationPanel() {
   return `<div class="panel"><h2>Does 60% really win 60%? <small>stated cover probability vs actual win rate on each model's bets</small></h2>
     <div class="table-wrap"><table><thead><tr><th>Stated</th>${MODELS.map(m => `<th style="color:${m.color}">${m.label}</th>`).join('')}</tr></thead>
     <tbody>${rows}</tbody></table></div>
-    <div class="body mut small">A bar reaching the tick means the model's confidence held up. Since Nov 20 2026 v3 uses a calibrated probability (fit on real results vs the line) and bets at 54%+; Formula and v2 still use the 60% rule.</div></div>`;
+    <div class="body mut small">A bar reaching the tick means the model's confidence held up. This is what decides when to switch to the Vegas rule (track-record-adjusted probability vs break-even), after about 150 graded bets per model.</div></div>`;
 }
 
 function disagreementsPanel() {
