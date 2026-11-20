@@ -308,7 +308,36 @@ function h1Card(g, showDate = false) {
     : `<div class="v3line totals"><span>1H total <b class="num" style="color:var(--violet)">${fmt(v3.h1_home + v3.h1_away, 1)}</b></span>
        <span class="mut num">full game ${fmt(v3.home + v3.away, 0)} · ${esc(shortName(v3.margin >= 0 ? g.home : g.away))} by ${fmt(Math.abs(v3.margin))}</span></div>`;
   return `<div class="card"><div class="card-top">${top}</div>
-    <div class="teams">${colsHead}${row(g.away, false)}${row(g.home, true)}</div>${detail}</div>`;
+    <div class="teams">${colsHead}${row(g.away, false)}${row(g.home, true)}</div>${detail}${kalshiLine(g)}</div>`;
+}
+
+/* Kalshi 1H market line (KalshiLines.py) and our lean against it; graded once the half is final. */
+function kalshiLeans(g) {
+  const k = g.k1h, v3 = g[OFFICIAL];
+  if (!k || !v3 || v3.h1_home === null || v3.h1_home === undefined) return null;
+  const pm = v3.h1_home - v3.h1_away, pt = v3.h1_home + v3.h1_away, f = g.h1_final;
+  const out = {};
+  if (k.margin !== null && k.margin !== undefined && pm !== k.margin) {
+    const home = pm > k.margin, res = f ? (f.home - f.away) - k.margin : null;
+    out.spread = { home, edge: Math.abs(pm - k.margin), result: res === null || res === 0 ? null : ((res > 0) === home ? 'W' : 'L') };
+  }
+  if (k.total !== null && k.total !== undefined && pt !== k.total) {
+    const over = pt > k.total, res = f ? (f.home + f.away) - k.total : null;
+    out.total = { over, edge: Math.abs(pt - k.total), result: res === null || res === 0 ? null : ((res > 0) === over ? 'W' : 'L') };
+  }
+  return out;
+}
+function kalshiLine(g) {
+  const k = g.k1h;
+  if (!k) return '';
+  const L = kalshiLeans(g) || {};
+  const tag = r => r ? ` <span class="res ${r}">${r}</span>` : '';
+  const sp = k.margin === null || k.margin === undefined ? null
+    : `${esc(shortName(k.margin >= 0 ? g.home : g.away))} ${k.margin === 0 ? 'PK' : '-' + fmt(Math.abs(k.margin), 1)}`;
+  const leanSp = L.spread ? `lean ${esc(shortName(L.spread.home ? g.home : g.away))} (${fmt(L.spread.edge, 1)})${tag(L.spread.result)}` : '';
+  const leanTo = L.total ? `lean ${L.total.over ? 'Over' : 'Under'} (${fmt(L.total.edge, 1)})${tag(L.total.result)}` : '';
+  return `<div class="v3line mut small"><span><b>Kalshi 1H</b> ${sp ? sp + ' · ' : ''}${k.total ? 'O/U ' + fmt(k.total, 1) : ''}</span>
+    <span class="num">${[leanSp, leanTo].filter(Boolean).join(' · ')}</span></div>`;
 }
 
 function renderH1() {
@@ -335,12 +364,15 @@ function renderH1() {
   const vs = (ours, half) => ours === null ? '' : `vs ${fmt(half, 2)} for half the full game · <span class="${ours <= half ? 'pos' : 'neg'}">${ours <= half ? 'better' : 'worse'}</span>`;
   const recentRows = graded.slice(0, 8).map(g => `<div class="recent-row"><span class="rr-pick">${esc(shortName(g.away))} ${g.neutral ? 'vs' : '@'} ${esc(shortName(g.home))}</span>
       <span class="mut small num">pred ${fmt(g[OFFICIAL].h1_away, 0)}-${fmt(g[OFFICIAL].h1_home, 0)} · actual ${g.h1_final.away}-${g.h1_final.home} · ${niceDate(g.date, { month: 'short', day: 'numeric' })}</span></div>`).join('');
+  const kRec = mk => { const rs = graded.map(g => (kalshiLeans(g) || {})[mk]).filter(x => x && x.result);
+    const w = rs.filter(x => x.result === 'W').length; return rs.length ? `${w}-${rs.length - w}` : '—'; };
   const tracker = `<div class="strip">
       <div class="stat accent"><div class="k">Graded</div><div class="v num">${graded.length}</div><div class="d">first halves with a v3 prediction</div></div>
       <details class="stat tracker"><summary><div class="k">1H margin error <span class="caret">▾</span></div><div class="v num">${mErr === null ? '—' : fmt(mErr, 2)}</div>
         <div class="d">${mErr === null ? 'no graded games yet' : vs(mErr, mHalf)}</div></summary>
         <div class="recent"><div class="mut small">Last 8 graded</div>${recentRows || '<div class="mut small">No graded games yet.</div>'}</div></details>
       <div class="stat"><div class="k">1H total error</div><div class="v num">${tErr === null ? '—' : fmt(tErr, 2)}</div><div class="d">${tErr === null ? 'backtest ~10.3' : vs(tErr, tHalf)}</div></div>
+      <div class="stat"><div class="k">vs Kalshi 1H line</div><div class="v num">${kRec('spread')}</div><div class="d">spread lean · total lean ${kRec('total')} · market lines from Nov 20, 2026</div></div>
       <div class="stat"><div class="k">1H leader</div><div class="v num">${leader === null ? '—' : fmt(leader * 100, 1) + '%'}</div><div class="d">picked the team ahead at the half · backtest ~67%</div></div>
     </div>`;
   $app.innerHTML = `

@@ -68,6 +68,12 @@ def load_tables():
     except Exception as e:
         print(f"  (first-half scores unavailable: {e})")
         t['halves'] = pd.DataFrame(columns=['game_date', 'home_team', 'away_team', 'home_h1', 'away_h1'])
+    try:     # Kalshi 1H lines (KalshiLines.py) shown on the 1H tab; the site builds without them
+        t['kalshi'] = query(cur, f"SELECT game_date, home_team, away_team, h1_margin_line, h1_total_line FROM workspace.default.kalshi_1h_lines WHERE game_date >= '{s}'")
+        t['kalshi']['game_date'] = pd.to_datetime(t['kalshi']['game_date']).dt.strftime('%Y-%m-%d')
+    except Exception as e:
+        print(f"  (Kalshi 1H lines unavailable: {e})")
+        t['kalshi'] = pd.DataFrame(columns=['game_date', 'home_team', 'away_team', 'h1_margin_line', 'h1_total_line'])
     cur.close(); conn.close()
     for k in ('history', 'outcomes', 'results', 'ml'):
         t[k]['game_date'] = pd.to_datetime(t[k]['game_date']).dt.strftime('%Y-%m-%d')
@@ -200,7 +206,7 @@ def build_games(t, key2id, id2name, neutral, finals, slates):
             games[k] = {'date': date, 'time': None, 'state': None, 'status': None,
                         'home': {'id': hid, 'name': id2name.get(hid, home)}, 'away': {'id': aid, 'name': id2name.get(aid, away)},
                         'neutral': neutral.get((date, hid, aid), False), 'spread': None, 'total_line': None,
-                        'formula': None, 'v2': None, 'v3': None, 'final': None, 'h1_final': None}
+                        'formula': None, 'v2': None, 'v3': None, 'final': None, 'h1_final': None, 'k1h': None}
         return games[k]
 
     hist = t['history'].sort_values('prediction_date').drop_duplicates(['game_date', 'home_team', 'away_team'], keep='last')
@@ -254,6 +260,14 @@ def build_games(t, key2id, id2name, neutral, finals, slates):
             games[same]['h1_final'] = {'home': int(r.home_h1), 'away': int(r.away_h1)}
         elif flipped in games:
             games[flipped]['h1_final'] = {'home': int(r.away_h1), 'away': int(r.home_h1)}
+    # Kalshi 1H market lines (home 1H margin, 1H total), matched as stored, then flipped
+    for r in t['kalshi'].itertuples(index=False):
+        same, flipped = (r.game_date, nk(r.home_team), nk(r.away_team)), (r.game_date, nk(r.away_team), nk(r.home_team))
+        mg, tot = clean(r.h1_margin_line), clean(r.h1_total_line)
+        if same in games:
+            games[same]['k1h'] = {'margin': mg, 'total': tot}
+        elif flipped in games:
+            games[flipped]['k1h'] = {'margin': None if mg is None else -mg, 'total': tot}
     # ESPN slate data (ids, times, live status, records) for the dates being shown live
     for sg in slates:
         k = (sg['date'], nk(sg['home']['name']), nk(sg['away']['name']))

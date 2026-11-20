@@ -91,6 +91,17 @@ jobs:
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
         run: python TrainModel.py
 
+      # Kalshi 1H spread/total lines for the 1H tab (display + grading only). Public data, no key.
+      # Skips games already started so a pre-tip line is never overwritten with in-game prices.
+      - name: Snapshot Kalshi 1H lines - display only
+        timeout-minutes: 5
+        continue-on-error: true
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_HTTP_PATH: ${{ secrets.DATABRICKS_HTTP_PATH }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+        run: python KalshiLines.py
+
       # Static website (site/) -> GitHub Pages. Runs even if an earlier step failed, so the site
       # still refreshes with whatever data is in Databricks.
       - name: Build website data
