@@ -621,7 +621,7 @@ def generate_predictions(models, games, ratings_df, state, spreads=None, bet_par
 
 
 def build_records(X, pred_margins, pred_totals, spreads, version, extras=None, bet_params=Betting.SCATTER_DEFAULT,
-                  totals=None, ou_scatter=Betting.OU_SCATTER_DEFAULT):
+                  totals=None, ou_scatter=Betting.OU_SCATTER_DEFAULT, big_line_rule=False):
     """
     Prediction rows for upload. extras: optional list of dicts merged into each record.
     Each row also carries the model's bet (Betting.make_bet on the stored, rounded margin).
@@ -647,7 +647,8 @@ def build_records(X, pred_margins, pred_totals, spreads, version, extras=None, b
             ats_conf = 'Low'
 
         # Bet on the margin as stored (rounded), the same number grading uses
-        bet = Betting.make_bet(game['home_team'], game['away_team'], round(pred_margin, 1), spread, bet_params)
+        bet = Betting.make_bet(game['home_team'], game['away_team'], round(pred_margin, 1), spread, bet_params,
+                               big_line_rule=big_line_rule)
         total_line = (totals or {}).get((name_key(game['home_team']), name_key(game['away_team'])))
         ou_bet = Betting.make_ou_bet(round(pred_total, 1), total_line, ou_scatter)
 
@@ -774,7 +775,7 @@ def run_v3(models, df_v2, games_today, ratings_df, state, spreads, bet_params=Be
                   for b, k, s, bt, kt, hh, ha in zip(bx, kp, share, box_tot, kp_tot, h1_home, h1_away)]
         return build_records(Xb, blended, v3_tot, spreads,
                              f"v3_{datetime.now().strftime('%Y%m%d')}", extras, bet_params=bet_params,
-                             totals=totals, ou_scatter=ou_scatter)
+                             totals=totals, ou_scatter=ou_scatter, big_line_rule=True)
     except Exception as e:
         print(f"::warning::v3 skipped ({type(e).__name__}: {e}); v2 predictions unaffected")
         return []

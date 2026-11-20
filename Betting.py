@@ -115,7 +115,13 @@ def scatter_for(home_spread, params):
     return a + b * abs(home_spread)
 
 
-def make_bet(home_team, away_team, model_margin, home_spread, params, threshold=BET_THRESHOLD):
+# Big lines (v3 only, Nov 20 2026): a line of BIG_LINE+ points needs BIG_LINE_THRESHOLD to bet. Backtest on
+# 30+ lines: at 60% 18-15 (+1.4u) 2025-26 and 8-12 (-4.7u) 2024-25; at 65% 13-6 (+5.8u) and 3-3 (-0.3u).
+BIG_LINE = 30.0
+BIG_LINE_THRESHOLD = 0.65
+
+
+def make_bet(home_team, away_team, model_margin, home_spread, params, threshold=BET_THRESHOLD, big_line_rule=False):
     """
     The model's bet on one game, or None.
 
@@ -126,6 +132,8 @@ def make_bet(home_team, away_team, model_margin, home_spread, params, threshold=
         return None
     home_spread = float(home_spread) + 0.0
     edge_home = float(model_margin) + home_spread
+    if big_line_rule and abs(home_spread) >= BIG_LINE:
+        threshold = max(threshold, BIG_LINE_THRESHOLD)
     p_home = _phi(edge_home / scatter_for(home_spread, params))
     if p_home >= threshold:
         side, prob, team, line = 'home', p_home, home_team, home_spread
