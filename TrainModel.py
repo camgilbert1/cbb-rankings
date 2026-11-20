@@ -740,6 +740,13 @@ def run_v3(models, df_v2, games_today, ratings_df, state, spreads, bet_params=Be
         # Separate from the margin; any failure here falls back to the KenPom total for this run only.
         kp_tot = Xb['kp_total_est'].values.astype(float)
         try:
+            kp_bias, n_kp = V3.kp_total_bias(df, CURRENT_SEASON)
+            kp_tot = kp_tot - kp_bias
+            print(f"  v3 total: KenPom formula scoring-level correction {-kp_bias:+.2f} pts "
+                  f"(last {V3.KP_TOTAL_BIAS_DAYS} days, {n_kp} games, shrunk)")
+        except Exception as e:
+            print(f"::warning::KenPom total correction unavailable ({type(e).__name__}: {e}); uncorrected this run")
+        try:
             total_model = V3.fit_box_total_model(df, weights, XGBOOST_PARAMS)
             bias, n_bias = V3.total_bias(total_model, df, CURRENT_SEASON)
             box_tot = total_model.predict(Xb[V3.BOX_TOTAL_FEATURES]) - bias

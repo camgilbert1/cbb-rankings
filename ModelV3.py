@@ -104,6 +104,25 @@ def total_bias(model, df, current_season):
     return float(np.mean(model.predict(cur[BOX_TOTAL_FEATURES]) - cur['total'].values)), len(cur)
 
 
+# Season scoring-level correction for the KenPom half of the v3 total: the formula has no constant, so it
+# lags a season that scores higher/lower than usual. Each run subtracts its mean miss on this season's
+# last KP_TOTAL_BIAS_DAYS days, shrunk by n / (n + KP_TOTAL_BIAS_SHRINK) while the sample is small.
+# Honest backtest (Nov 2026): total RMSE 17.432 -> 17.307 (2025-26), 16.717 -> 16.587 (2024-25); flat to Dec 15.
+KP_TOTAL_BIAS_DAYS = 14
+KP_TOTAL_BIAS_SHRINK = 100
+
+
+def kp_total_bias(df, current_season):
+    """Shrunk mean (KenPom formula total - actual) on this season's last KP_TOTAL_BIAS_DAYS days, and n."""
+    cur = df[(df['season'] == current_season)].dropna(subset=['kp_total_est', 'total'])
+    if cur.empty:
+        return 0.0, 0
+    cur = cur[cur['game_date'] >= cur['game_date'].max() - pd.Timedelta(days=KP_TOTAL_BIAS_DAYS)]
+    n = len(cur)
+    raw = float(np.mean(cur['kp_total_est'].values.astype(float) - cur['total'].values.astype(float)))
+    return raw * n / (n + KP_TOTAL_BIAS_SHRINK), n
+
+
 # First-half predictions (1H tab, added Nov 18 2026). Honest tests (train 2 seasons, test 2025-26 / 2024-25):
 #   1H margin = v3 margin x measured 1H margin share (~0.535): RMSE 9.27 / 9.26 (a separate 1H model was worse)
 #   1H total  = average of (v3 total x 1H scoring share ~0.469) and a direct v3-style 1H total model:
