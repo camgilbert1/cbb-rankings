@@ -209,14 +209,13 @@ function renderPicks() {
   const picks = day.filter(isPick);
   const nAts = day.filter(g => betOf(g, OFFICIAL)).length, nOu = day.filter(g => betOf(g, OFFICIAL, 'ou')).length;
   const v3Ran = (S.meta.v3_dates || []).includes(ui.date) || day.some(g => g[OFFICIAL]);
-  // Search covers every game on the site (all dates, newest first); otherwise the selected day.
+  // Search filters the selected day's games only.
   // Games are in tip-off order; official picks stay in place (highlighted, not moved to the top).
   const q = (ui.q || '').trim().toLowerCase();
   const matches = g => [g.home, g.away].some(s => [s.name, s.short, shortName(s)].some(n => (n || '').toLowerCase().includes(q)));
-  let gs = q ? S.games.filter(matches) : day;
+  let gs = q ? day.filter(matches) : day;
   if (ui.filter === 'picks') gs = gs.filter(isPick);
-  gs = [...gs].sort(q ? (a, b) => b.date.localeCompare(a.date) || (a.time || '').localeCompare(b.time || '')
-                      : (a, b) => (a.time || '').localeCompare(b.time || ''));
+  gs = [...gs].sort((a, b) => (a.time || '').localeCompare(b.time || ''));
   const season = betStats(OFFICIAL, S.games), seasonOu = betStats(OFFICIAL, S.games, 'ou');
   // Season record boxes open to show the last 5 graded official picks of that market (#25)
   const recent = mk => {
@@ -265,8 +264,8 @@ function renderPicks() {
       <span class="spacer"></span>
       <input class="search" id="gq" type="search" placeholder="Search teams…" value="${esc(ui.q || '')}" aria-label="Search teams">
     </div>
-    ${q ? `<div class="mut small" style="margin:-6px 0 10px">${gs.length} game${gs.length === 1 ? '' : 's'} matching “${esc(ui.q)}” across all dates</div>` : ''}
-    ${gs.length ? `<div class="cards">${gs.map(g => gameCard(g, !!q)).join('')}</div>` : `<div class="empty">${q ? `No games match “${esc(ui.q)}”.` : ui.filter === 'picks' ? 'No official picks this day.' : 'No games this day.'}</div>`}`;
+    ${q ? `<div class="mut small" style="margin:-6px 0 10px">${gs.length} game${gs.length === 1 ? '' : 's'} matching “${esc(ui.q)}” on this day</div>` : ''}
+    ${gs.length ? `<div class="cards">${gs.map(g => gameCard(g, false)).join('')}</div>` : `<div class="empty">${q ? `No games on this day match “${esc(ui.q)}”.` : ui.filter === 'picks' ? 'No official picks this day.' : 'No games this day.'}</div>`}`;
   document.getElementById('date').onchange = e => { ui.date = e.target.value; renderPicks(); };
   document.querySelectorAll('[data-f]').forEach(b => b.onclick = () => { ui.filter = b.dataset.f; renderPicks(); });
   const gq = document.getElementById('gq');
@@ -319,9 +318,8 @@ function renderH1() {
   const q = (ui.q || '').trim().toLowerCase();
   const matches = g => [g.home, g.away].some(s => [s.name, s.short, shortName(s)].some(n => (n || '').toLowerCase().includes(q)));
   const hasH1 = g => g[OFFICIAL] && g[OFFICIAL].h1_home !== null && g[OFFICIAL].h1_home !== undefined;
-  let gs = (q ? S.games.filter(matches) : day).filter(hasH1);
-  gs = [...gs].sort(q ? (a, b) => b.date.localeCompare(a.date) || (a.time || '').localeCompare(b.time || '')
-                      : (a, b) => (a.time || '').localeCompare(b.time || ''));
+  let gs = (q ? day.filter(matches) : day).filter(hasH1);
+  gs = [...gs].sort((a, b) => (a.time || '').localeCompare(b.time || ''));
   // Accuracy tracker: every game with a v3 1H prediction and an actual first-half score.
   // Benchmark = "half of v3's full-game prediction"; if we can't beat that, the 1H model adds nothing.
   const graded = S.games.filter(g => hasH1(g) && g.h1_final)
@@ -352,8 +350,8 @@ function renderH1() {
     ${tracker}
     <div class="controls"><span class="spacer"></span>
       <input class="search" id="gq" type="search" placeholder="Search teams…" value="${esc(ui.q || '')}" aria-label="Search teams"></div>
-    ${gs.length ? `<div class="cards">${gs.map(g => h1Card(g, !!q)).join('')}</div>`
-      : `<div class="empty">${q ? `No first-half predictions match “${esc(ui.q)}”.` : 'No first-half predictions for this day (they start Nov 18, 2026).'}</div>`}`;
+    ${gs.length ? `<div class="cards">${gs.map(g => h1Card(g, false)).join('')}</div>`
+      : `<div class="empty">${q ? `No first-half predictions on this day match “${esc(ui.q)}”.` : 'No first-half predictions for this day (they start Nov 18, 2026).'}</div>`}`;
   document.getElementById('date').onchange = e => { ui.date = e.target.value; renderH1(); };
   const gq = document.getElementById('gq');
   gq.oninput = e => { ui.q = e.target.value; const pos = e.target.selectionStart; renderH1();
