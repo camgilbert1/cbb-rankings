@@ -312,7 +312,7 @@ function h1Card(g, showDate = false) {
       <div class="ob-top"><span class="ob-label">OFFICIAL 1H O/U</span>${p.result ? resChip(p.result) : ''}</div>
       <div class="ob-pick">1H ${p.over ? 'OVER' : 'UNDER'} ${fmt(p.line, 1)}</div>
       <div class="ob-meta num">${fmt(p.prob * 100, 0)}% · gap ${fmt(p.edge, 1)} pts · 1U · ${esc(p.src)}</div></div>` : '';
-  return `<div class="card${p ? ' h1-edge' : ''}"><div class="card-top">${top}</div>${banner}
+  return `<div class="card${p ? ' h1-edge' : ''}" id="${cardId(g)}"><div class="card-top">${top}</div>${banner}
     <div class="teams">${colsHead}${row(g.away, false)}${row(g.home, true)}</div>${kalshiLine(g)}${detail}</div>`;
 }
 
@@ -446,6 +446,7 @@ function renderH1() {
     <div class="page-head"><div><h1>First Half</h1>
       <div class="sub">${niceDate(ui.date, { weekday: 'long', month: 'long', day: 'numeric' })} · v3 first-half predictions · official 1H O/U picks at ${fmt(H1_OU_THRESHOLD * 100, 0)}%+ vs the 1H market line</div></div>
       <select class="select" id="date">${dates.map(d => `<option value="${d}" ${d === ui.date ? 'selected' : ''}>${niceDate(d)}</option>`).join('')}</select></div>
+    ${h1PlaysBar(day, ui)}
     ${tracker}
     <div class="controls">
       <select class="select" id="h1sort" aria-label="Sort games">
@@ -460,6 +461,31 @@ function renderH1() {
   document.getElementById('date').onchange = e => { ui.date = e.target.value; renderH1(); };
   document.getElementById('h1sort').onchange = e => { ui.sort = e.target.value; renderH1(); };
   document.getElementById('h1big').onclick = () => { ui.big = !ui.big; renderH1(); };
+  const playsEl = document.getElementById('h1plays');
+  if (playsEl) playsEl.ontoggle = () => lsSet('cbb.h1PlaysOpen', playsEl.open ? '1' : '0');
+  document.querySelectorAll('.play-row').forEach(b => b.onclick = () => {
+    let card = document.getElementById(b.dataset.card);
+    if (!card && (ui.q || ui.big)) { ui.q = ''; ui.big = false; renderH1(); card = document.getElementById(b.dataset.card); }
+    if (!card) return;
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    card.classList.remove('flash'); void card.offsetWidth; card.classList.add('flash');
+  });
+}
+
+/* 1H "Today's plays" dropdown (same look as the Games tab): every official 1H O/U pick for the day, tap to jump */
+function h1PlaysBar(day, ui) {
+  const plays = day.map(g => ({ g, p: h1Pick(g) })).filter(x => x.p)
+    .sort((a, b) => (a.g.time || '').localeCompare(b.g.time || ''));
+  if (!plays.length) return '';
+  const open = lsGet('cbb.h1PlaysOpen') === '1';
+  return `<details class="plays" id="h1plays" ${open ? 'open' : ''}>
+    <summary><span class="plays-title">${ui.date === S.meta.today ? "Today's 1H plays" : '1H plays'}</span>
+      <span class="mut num">${plays.length} · 1H O/U</span><span class="caret">▾</span></summary>
+    <div class="play-list">${plays.map(({ g, p }) => `<button class="play-row" data-card="${cardId(g)}">
+      <span class="tag mk-ou">1H O/U</span>
+      <span class="pr-main"><span class="pr-pick">${p.over ? 'OVER' : 'UNDER'} ${fmt(p.line, 1)}${p.result ? ' ' + resChip(p.result) : ''}</span>
+        <span class="pr-sub">${esc(etTime(g.time).replace(' ET', ''))} · ${esc(shortName(g.away))} ${g.neutral ? 'vs' : '@'} ${esc(shortName(g.home))}</span></span>
+      <span class="pr-prob num">${fmt(p.prob * 100, 0)}%</span></button>`).join('')}</div></details>`;
   const gq = document.getElementById('gq');
   gq.oninput = e => { ui.q = e.target.value; const pos = e.target.selectionStart; renderH1();
     const n = document.getElementById('gq'); n.focus(); n.setSelectionRange(pos, pos); };
