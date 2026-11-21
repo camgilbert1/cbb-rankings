@@ -250,3 +250,22 @@ details[open] > summary .caret { transform: rotate(180deg); }
   .tabs::-webkit-scrollbar { display: none; }
   .tabs a { padding: 0 7px; white-space: nowrap; }
 }
+
+/* 1H tab: market vs model table (O/U row first and emphasized); cards with an O/U gap of 2+ are highlighted */
+.h1m { margin: 10px 14px 4px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.h1m-row { display: grid; grid-template-columns: 64px 1fr 1fr 1.25fr; gap: 8px; align-items: center; padding: 8px 10px; font-size: 13px; border-top: 1px solid var(--line); }
+.h1m-row > span:nth-child(2), .h1m-row > span:nth-child(3) { text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.h1m-lean { text-align: right; white-space: nowrap; }
+.h1m-head { border-top: 0; background: var(--panel-2); color: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; padding: 6px 10px; }
+.h1m-head > span:last-child { text-align: right; }
+.h1m-k { color: var(--muted); font-weight: 700; }
+.h1m-v3 { color: var(--violet); font-weight: 700; }
+.h1m-row.ou { font-size: 15px; }
+.h1m-row.ou .h1m-k { color: var(--blue); }
+.lean { display: inline-block; padding: 2px 8px; border-radius: 6px; background: var(--panel-2); color: var(--text); font-size: 12px; font-weight: 700; }
+.lean.ou { background: var(--blue-bg); color: var(--blue); }
+.h1m-row.big { background: var(--blue-bg); }
+.h1m-row.big .lean.ou { background: var(--blue); color: #fff; font-size: 13px; }
+.h1m-src { padding: 4px 10px 6px; border-top: 1px solid var(--line); text-align: right; font-size: 11px; }
+.card.h1-edge { border-color: var(--blue); box-shadow: 0 0 0 1px var(--blue-bg) inset; }
+@media (max-width: 420px) { .h1m-row { grid-template-columns: 52px 1fr 1fr 1.3fr; gap: 6px; font-size: 12px; } .h1m-row.ou { font-size: 14px; } }

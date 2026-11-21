@@ -307,9 +307,12 @@ function h1Card(g, showDate = false) {
   const detail = !has ? '<div class="v3line mut">No first-half prediction for this game</div>'
     : `<div class="v3line totals"><span>1H total <b class="num" style="color:var(--violet)">${fmt(v3.h1_home + v3.h1_away, 1)}</b></span>
        <span class="mut num">full game ${fmt(v3.home + v3.away, 0)} · ${esc(shortName(v3.margin >= 0 ? g.home : g.away))} by ${fmt(Math.abs(v3.margin))}</span></div>`;
-  return `<div class="card"><div class="card-top">${top}</div>
-    <div class="teams">${colsHead}${row(g.away, false)}${row(g.home, true)}</div>${detail}${kalshiLine(g)}</div>`;
+  const L = has ? (kalshiLeans(g) || {}) : {};
+  const big = L.total && L.total.edge >= H1_BIG_GAP;
+  return `<div class="card${big ? ' h1-edge' : ''}"><div class="card-top">${top}</div>
+    <div class="teams">${colsHead}${row(g.away, false)}${row(g.home, true)}</div>${kalshiLine(g)}${detail}</div>`;
 }
+const H1_BIG_GAP = 2;                           // O/U gap (pts) that gets the highlighted card
 
 /* Kalshi 1H market line (KalshiLines.py) and our lean against it; graded once the half is final. */
 function kalshiLeans(g) {
@@ -327,19 +330,33 @@ function kalshiLeans(g) {
   }
   return out;
 }
+/* 1H market table: Market | v3 | Gap per row (O/U first, it's the one we watch), lean + W/L once graded. */
 function kalshiLine(g) {
-  const k = g.k1h;
-  if (!k) return '';
+  const k = g.k1h, v3 = g[OFFICIAL];
+  if (!k || !v3 || v3.h1_home === null || v3.h1_home === undefined) return '';
   const L = kalshiLeans(g) || {};
   const srcs = [...new Set([k.src_m, k.src_t].filter(Boolean))].join(' / ') || 'Kalshi';
   const tag = r => r ? ` <span class="res ${r}">${r}</span>` : '';
-  const sp = k.margin === null || k.margin === undefined ? null
-    : `${esc(shortName(k.margin >= 0 ? g.home : g.away))} ${k.margin === 0 ? 'PK' : '-' + fmt(Math.abs(k.margin), 1)}`;
-  const leanSp = L.spread ? `lean ${esc(shortName(L.spread.home ? g.home : g.away))} (${fmt(L.spread.edge, 1)})${tag(L.spread.result)}` : '';
-  const leanTo = L.total ? `lean ${L.total.over ? 'Over' : 'Under'} (${fmt(L.total.edge, 1)})${tag(L.total.result)}` : '';
-  const note = [leanSp, leanTo].filter(Boolean).join(' · ');
-  return `<div class="v3line mut small"><span><b>1H line</b> ${sp ? sp + ' · ' : ''}${k.total ? 'O/U ' + fmt(k.total, 1) : ''} <span class="mut">(${esc(srcs)})</span></span>
-    <span class="num">${note}</span></div>`;
+  const has = v => v !== null && v !== undefined;
+  const pm = v3.h1_home - v3.h1_away, pt = v3.h1_home + v3.h1_away;
+  const rows = [];
+  if (has(k.total)) {
+    const t = L.total;
+    rows.push(`<div class="h1m-row ou${t && t.edge >= H1_BIG_GAP ? ' big' : ''}"><span class="h1m-k">O/U</span>
+      <span class="num">${fmt(k.total, 1)}</span><span class="num h1m-v3">${fmt(pt, 1)}</span>
+      <span class="h1m-lean">${t ? `<span class="lean ou">${t.over ? 'OVER' : 'UNDER'} <b class="num">${fmt(t.edge, 1)}</b></span>${tag(t.result)}` : '<span class="mut">—</span>'}</span></div>`);
+  }
+  if (has(k.margin)) {
+    const s = L.spread, fav = k.margin >= 0 ? g.home : g.away;
+    const ln = k.margin === 0 ? 'PK' : `${esc(shortName(fav))} -${fmt(Math.abs(k.margin), 1)}`;
+    const ours = pm === 0 ? 'PK' : `${esc(shortName(pm >= 0 ? g.home : g.away))} -${fmt(Math.abs(pm), 1)}`;
+    rows.push(`<div class="h1m-row"><span class="h1m-k">Spread</span>
+      <span class="num">${ln}</span><span class="num h1m-v3">${ours}</span>
+      <span class="h1m-lean">${s ? `<span class="lean">${esc(shortName(s.home ? g.home : g.away))} <b class="num">${fmt(s.edge, 1)}</b></span>${tag(s.result)}` : '<span class="mut">—</span>'}</span></div>`);
+  }
+  if (!rows.length) return '';
+  return `<div class="h1m"><div class="h1m-row h1m-head"><span>1H vs market</span><span>Market</span><span>v3</span><span>Lean · gap</span></div>
+    ${rows.join('')}<div class="h1m-src mut small">${esc(srcs)}</div></div>`;
 }
 
 function renderH1() {
@@ -350,7 +367,13 @@ function renderH1() {
   const matches = g => [g.home, g.away].some(s => [s.name, s.short, shortName(s)].some(n => (n || '').toLowerCase().includes(q)));
   const hasH1 = g => g[OFFICIAL] && g[OFFICIAL].h1_home !== null && g[OFFICIAL].h1_home !== undefined;
   let gs = (q ? day.filter(matches) : day).filter(hasH1);
-  gs = [...gs].sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+  // Sort: tip time, or biggest O/U / spread gap vs the 1H market (games without a line go last)
+  const gap = (g, mk) => { const x = (kalshiLeans(g) || {})[mk]; return x ? x.edge : -1; };
+  ui.sort = ui.sort || 'time';
+  if (ui.big) gs = gs.filter(g => gap(g, 'total') >= H1_BIG_GAP);
+  const byGap = (a, b) => ui.sort === 'ou' ? gap(b, 'total') - gap(a, 'total') : ui.sort === 'sp' ? gap(b, 'spread') - gap(a, 'spread') : 0;
+  gs = [...gs].sort((a, b) => byGap(a, b) || (a.time || '').localeCompare(b.time || ''));
+  const nBig = day.filter(hasH1).filter(g => gap(g, 'total') >= H1_BIG_GAP).length;
   // Accuracy tracker: every game with a v3 1H prediction and an actual first-half score.
   // Benchmark = "half of v3's full-game prediction"; if we can't beat that, the 1H model adds nothing.
   const graded = S.games.filter(g => hasH1(g) && g.h1_final)
@@ -382,11 +405,19 @@ function renderH1() {
       <div class="sub">${niceDate(ui.date, { weekday: 'long', month: 'long', day: 'numeric' })} · v3 first-half predictions · no bets, for checking against the books</div></div>
       <select class="select" id="date">${dates.map(d => `<option value="${d}" ${d === ui.date ? 'selected' : ''}>${niceDate(d)}</option>`).join('')}</select></div>
     ${tracker}
-    <div class="controls"><span class="spacer"></span>
+    <div class="controls">
+      <select class="select" id="h1sort" aria-label="Sort games">
+        <option value="time" ${ui.sort === 'time' ? 'selected' : ''}>Sort: Tip time</option>
+        <option value="ou" ${ui.sort === 'ou' ? 'selected' : ''}>Sort: Biggest O/U gap</option>
+        <option value="sp" ${ui.sort === 'sp' ? 'selected' : ''}>Sort: Biggest spread gap</option></select>
+      <button class="chip ${ui.big ? 'on' : ''}" id="h1big">O/U gap ${H1_BIG_GAP}+ <span class="mut">${nBig}</span></button>
+      <span class="spacer"></span>
       <input class="search" id="gq" type="search" placeholder="Search teams…" value="${esc(ui.q || '')}" aria-label="Search teams"></div>
     ${gs.length ? `<div class="cards">${gs.map(g => h1Card(g, false)).join('')}</div>`
-      : `<div class="empty">${q ? `No first-half predictions on this day match “${esc(ui.q)}”.` : 'No first-half predictions for this day (they start Nov 18, 2026).'}</div>`}`;
+      : `<div class="empty">${q ? `No first-half predictions on this day match “${esc(ui.q)}”.` : ui.big ? `No games with an O/U gap of ${H1_BIG_GAP}+ this day.` : 'No first-half predictions for this day (they start Nov 18, 2026).'}</div>`}`;
   document.getElementById('date').onchange = e => { ui.date = e.target.value; renderH1(); };
+  document.getElementById('h1sort').onchange = e => { ui.sort = e.target.value; renderH1(); };
+  document.getElementById('h1big').onclick = () => { ui.big = !ui.big; renderH1(); };
   const gq = document.getElementById('gq');
   gq.oninput = e => { ui.q = e.target.value; const pos = e.target.selectionStart; renderH1();
     const n = document.getElementById('gq'); n.focus(); n.setSelectionRange(pos, pos); };
