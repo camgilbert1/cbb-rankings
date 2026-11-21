@@ -307,12 +307,38 @@ function h1Card(g, showDate = false) {
   const detail = !has ? '<div class="v3line mut">No first-half prediction for this game</div>'
     : `<div class="v3line totals"><span>1H total <b class="num" style="color:var(--violet)">${fmt(v3.h1_home + v3.h1_away, 1)}</b></span>
        <span class="mut num">full game ${fmt(v3.home + v3.away, 0)} · ${esc(shortName(v3.margin >= 0 ? g.home : g.away))} by ${fmt(Math.abs(v3.margin))}</span></div>`;
-  const L = has ? (kalshiLeans(g) || {}) : {};
-  const big = L.total && L.total.edge >= H1_BIG_GAP;
-  return `<div class="card${big ? ' h1-edge' : ''}"><div class="card-top">${top}</div>
+  const p = h1Pick(g);
+  const banner = p ? `<div class="official-banner h1-banner">
+      <div class="ob-top"><span class="ob-label">OFFICIAL 1H O/U</span>${p.result ? resChip(p.result) : ''}</div>
+      <div class="ob-pick">1H ${p.over ? 'OVER' : 'UNDER'} ${fmt(p.line, 1)}</div>
+      <div class="ob-meta num">${fmt(p.prob * 100, 0)}% · gap ${fmt(p.edge, 1)} pts · 1U · ${esc(p.src)}</div></div>` : '';
+  return `<div class="card${p ? ' h1-edge' : ''}"><div class="card-top">${top}</div>${banner}
     <div class="teams">${colsHead}${row(g.away, false)}${row(g.home, true)}</div>${kalshiLine(g)}${detail}</div>`;
 }
-const H1_BIG_GAP = 2;                           // O/U gap (pts) that gets the highlighted card
+
+/* Official 1H O/U pick (1H tab only; nothing else bets on it). Chance the lean is right =
+   Phi(gap / H1_OU_SCATTER); pick at H1_OU_THRESHOLD+. Scatter = sd of (actual 1H total - Kalshi line) in the
+   Feb-Apr 2026 backtest; 55% was the best cutoff there (186 picks, 55.4%). Graded at -110, 1 unit. */
+const H1_OU_SCATTER = 9.76, H1_OU_THRESHOLD = 0.55;
+function normCdf(z) {                            // Abramowitz-Stegun 7.1.26
+  const t = 1 / (1 + 0.3275911 * Math.abs(z) / Math.SQRT2);
+  const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-z * z / 2);
+  return z >= 0 ? (1 + y) / 2 : (1 - y) / 2;
+}
+const normInvGap = () => {                       // smallest gap that reaches the threshold (for labels)
+  let lo = 0, hi = 30;
+  for (let i = 0; i < 40; i++) { const m = (lo + hi) / 2; normCdf(m / H1_OU_SCATTER) < H1_OU_THRESHOLD ? lo = m : hi = m; }
+  return hi;
+};
+function h1Pick(g) {
+  const k = g.k1h, v3 = g[OFFICIAL];
+  if (!k || k.total === null || k.total === undefined || !v3 || v3.h1_home === null || v3.h1_home === undefined) return null;
+  const pt = v3.h1_home + v3.h1_away, edge = Math.abs(pt - k.total), prob = normCdf(edge / H1_OU_SCATTER);
+  if (prob < H1_OU_THRESHOLD) return null;
+  const over = pt > k.total, f = g.h1_final, res = f ? (f.home + f.away) - k.total : null;
+  return { over, edge, prob, line: k.total, src: k.src_t || 'Kalshi',
+           result: res === null ? null : res === 0 ? 'P' : (res > 0) === over ? 'W' : 'L' };
+}
 
 /* Kalshi 1H market line (KalshiLines.py) and our lean against it; graded once the half is final. */
 function kalshiLeans(g) {
@@ -342,7 +368,7 @@ function kalshiLine(g) {
   const rows = [];
   if (has(k.total)) {
     const t = L.total;
-    rows.push(`<div class="h1m-row ou${t && t.edge >= H1_BIG_GAP ? ' big' : ''}"><span class="h1m-k">O/U</span>
+    rows.push(`<div class="h1m-row ou${h1Pick(g) ? ' big' : ''}"><span class="h1m-k">O/U</span>
       <span class="num">${fmt(k.total, 1)}</span><span class="num h1m-v3">${fmt(pt, 1)}</span>
       <span class="h1m-lean">${t ? `<span class="lean ou">${t.over ? 'OVER' : 'UNDER'} <b class="num">${fmt(t.edge, 1)}</b></span>${tag(t.result)}` : '<span class="mut">—</span>'}</span></div>`);
   }
@@ -370,10 +396,10 @@ function renderH1() {
   // Sort: tip time, or biggest O/U / spread gap vs the 1H market (games without a line go last)
   const gap = (g, mk) => { const x = (kalshiLeans(g) || {})[mk]; return x ? x.edge : -1; };
   ui.sort = ui.sort || 'time';
-  if (ui.big) gs = gs.filter(g => gap(g, 'total') >= H1_BIG_GAP);
+  if (ui.big) gs = gs.filter(g => h1Pick(g));
   const byGap = (a, b) => ui.sort === 'ou' ? gap(b, 'total') - gap(a, 'total') : ui.sort === 'sp' ? gap(b, 'spread') - gap(a, 'spread') : 0;
   gs = [...gs].sort((a, b) => byGap(a, b) || (a.time || '').localeCompare(b.time || ''));
-  const nBig = day.filter(hasH1).filter(g => gap(g, 'total') >= H1_BIG_GAP).length;
+  const nBig = day.filter(hasH1).filter(g => h1Pick(g)).length;
   // Accuracy tracker: every game with a v3 1H prediction and an actual first-half score.
   // Benchmark = "half of v3's full-game prediction"; if we can't beat that, the 1H model adds nothing.
   const graded = S.games.filter(g => hasH1(g) && g.h1_final)
@@ -391,8 +417,24 @@ function renderH1() {
       <span class="mut small num">pred ${fmt(g[OFFICIAL].h1_away, 0)}-${fmt(g[OFFICIAL].h1_home, 0)} · actual ${g.h1_final.away}-${g.h1_final.home} · ${niceDate(g.date, { month: 'short', day: 'numeric' })}</span></div>`).join('');
   const kRec = mk => { const rs = graded.map(g => (kalshiLeans(g) || {})[mk]).filter(x => x && x.result);
     const w = rs.filter(x => x.result === 'W').length; return rs.length ? `${w}-${rs.length - w}` : '—'; };
+  // Official 1H O/U picks record (every day, not just the selected one), -110 pricing, 1 unit each
+  const picked = S.games.filter(g => h1Pick(g)).map(g => ({ g, p: h1Pick(g) }));
+  const done = picked.filter(x => x.p.result);
+  const pw = done.filter(x => x.p.result === 'W').length, pl = done.filter(x => x.p.result === 'L').length,
+        pp = done.filter(x => x.p.result === 'P').length, pend = picked.length - done.length;
+  const pUnits = pw * (100 / 110) - pl, pPct = pw + pl ? pw / (pw + pl) * 100 : null;
+  const pRecent = done.sort((a, b) => b.g.date.localeCompare(a.g.date) || (b.g.time || '').localeCompare(a.g.time || '')).slice(0, 5)
+    .map(({ g, p }) => `<div class="recent-row"><span class="res ${p.result}">${p.result}</span>
+      <span class="rr-pick">1H ${p.over ? 'OVER' : 'UNDER'} ${fmt(p.line, 1)} · ${esc(shortName(g.away))} ${g.neutral ? 'vs' : '@'} ${esc(shortName(g.home))}</span>
+      <span class="mut small num">${niceDate(g.date, { month: 'short', day: 'numeric' })} · ${g.h1_final.home + g.h1_final.away}</span></div>`).join('');
   const tracker = `<div class="strip">
-      <div class="stat accent"><div class="k">Graded</div><div class="v num">${graded.length}</div><div class="d">first halves with a v3 prediction</div></div>
+      <details class="stat tracker accent h1-rec"><summary><div class="k">1H O/U picks record <span class="caret">▾</span></div>
+        <div class="v num">${pw}-${pl}${pp ? '-' + pp : ''}</div>
+        <div class="d">${pPct === null ? (pend ? pend + ' pending' : 'no graded picks yet')
+          : `${fmt(pPct)}% · <span class="${pUnits >= 0 ? 'pos' : 'neg'}">${unitsStr(pUnits)}</span> · ${pw + pl + pp} picks${pend ? ' · ' + pend + ' pending' : ''}`}
+          · ${fmt(H1_OU_THRESHOLD * 100, 0)}%+ (gap ${fmt(normInvGap(), 1)}+)</div></summary>
+        <div class="recent"><div class="mut small">Last 5 graded</div>${pRecent || '<div class="mut small">No graded picks yet.</div>'}</div></details>
+      <div class="stat"><div class="k">Graded</div><div class="v num">${graded.length}</div><div class="d">first halves with a v3 prediction</div></div>
       <details class="stat tracker"><summary><div class="k">1H margin error <span class="caret">▾</span></div><div class="v num">${mErr === null ? '—' : fmt(mErr, 2)}</div>
         <div class="d">${mErr === null ? 'no graded games yet' : vs(mErr, mHalf)}</div></summary>
         <div class="recent"><div class="mut small">Last 8 graded</div>${recentRows || '<div class="mut small">No graded games yet.</div>'}</div></details>
@@ -402,7 +444,7 @@ function renderH1() {
     </div>`;
   $app.innerHTML = `
     <div class="page-head"><div><h1>First Half</h1>
-      <div class="sub">${niceDate(ui.date, { weekday: 'long', month: 'long', day: 'numeric' })} · v3 first-half predictions · no bets, for checking against the books</div></div>
+      <div class="sub">${niceDate(ui.date, { weekday: 'long', month: 'long', day: 'numeric' })} · v3 first-half predictions · official 1H O/U picks at ${fmt(H1_OU_THRESHOLD * 100, 0)}%+ vs the 1H market line</div></div>
       <select class="select" id="date">${dates.map(d => `<option value="${d}" ${d === ui.date ? 'selected' : ''}>${niceDate(d)}</option>`).join('')}</select></div>
     ${tracker}
     <div class="controls">
@@ -410,11 +452,11 @@ function renderH1() {
         <option value="time" ${ui.sort === 'time' ? 'selected' : ''}>Sort: Tip time</option>
         <option value="ou" ${ui.sort === 'ou' ? 'selected' : ''}>Sort: Biggest O/U gap</option>
         <option value="sp" ${ui.sort === 'sp' ? 'selected' : ''}>Sort: Biggest spread gap</option></select>
-      <button class="chip ${ui.big ? 'on' : ''}" id="h1big">O/U gap ${H1_BIG_GAP}+ <span class="mut">${nBig}</span></button>
+      <button class="chip ${ui.big ? 'on' : ''}" id="h1big">1H O/U picks only <span class="mut">${nBig}</span></button>
       <span class="spacer"></span>
       <input class="search" id="gq" type="search" placeholder="Search teams…" value="${esc(ui.q || '')}" aria-label="Search teams"></div>
     ${gs.length ? `<div class="cards">${gs.map(g => h1Card(g, false)).join('')}</div>`
-      : `<div class="empty">${q ? `No first-half predictions on this day match “${esc(ui.q)}”.` : ui.big ? `No games with an O/U gap of ${H1_BIG_GAP}+ this day.` : 'No first-half predictions for this day (they start Nov 18, 2026).'}</div>`}`;
+      : `<div class="empty">${q ? `No first-half predictions on this day match “${esc(ui.q)}”.` : ui.big ? 'No official 1H O/U picks this day.' : 'No first-half predictions for this day (they start Nov 18, 2026).'}</div>`}`;
   document.getElementById('date').onchange = e => { ui.date = e.target.value; renderH1(); };
   document.getElementById('h1sort').onchange = e => { ui.sort = e.target.value; renderH1(); };
   document.getElementById('h1big').onclick = () => { ui.big = !ui.big; renderH1(); };
