@@ -3,9 +3,8 @@ v3 model: point-in-time box-score ratings (BoxRatings.py) blended with the v2 Ke
 
   v3 margin = w(gp) * box_model + (1 - w(gp)) * v2_model
     gp = games played by the less-experienced team.
-    w starts at BOX_SHARE_DEFAULT. Once DYN_MIN_GAMES current-season games have day-of KenPom
-    ratings, w(gp) = a + b*gp is fit on those games from HONEST component predictions
-    (both models trained on earlier seasons only), clipped to [0, 1].
+    w(gp) is a per-band share learned from past seasons' honest component predictions (fit_trust, Nov 22 2026);
+    BOX_SHARE_DEFAULT only if fewer than 2 past seasons are available.
   v3 total = KenPom tempo formula (same as v2; box totals lost to it in Nov 2026 evaluation).
 
 Evaluation: EvaluateBoxModel.py. Nov 2026, 195 leak-free 2027 games: v2 12.96 RMSE,
@@ -168,22 +167,46 @@ def fit_box_model(df, weights, xgb_params):
     return m
 
 
+TRUST_BINS = [(0, 2), (3, 5), (6, 9), (10, 14), (15, 20), (21, 999)]   # games played by the less-experienced team
+TRUST_MIN_GAMES = 200                                                  # per bin; fewer -> BOX_SHARE_DEFAULT
+
+
 def fit_trust(df, current_season, v2_features, xgb_params, season_weights):
     """
-    Box share as a function of games played. Returns (fn(gp array) -> share array, description).
-    Component predictions are honest: both models trained on seasons before current_season.
+    Box share by games-played band, learned from PAST seasons (Nov 22 2026; replaced the straight line fit on the
+    current season's first 400 games, which extrapolated to 100% box score by 15 games played).
+    Each past season (day-of KenPom) is predicted by box + KenPom models trained on the OTHER past seasons only,
+    then per band w = argmin error of w*box + (1-w)*kp, clipped to [0, 1].
+    Honest backtest (test 2025-26 and 2024-25): margin RMSE 11.419 vs 11.432 old dynamic line, 11.434 fixed 25%.
+    Returns (fn(gp array) -> share array, description).
     """
-    pit = df[(df['season'] == current_season) & df['ratings_point_in_time'].astype(bool)]
-    if len(pit) < DYN_MIN_GAMES:
+    past = df[(df['season'] < current_season) & df['ratings_point_in_time'].astype(bool)]
+    seasons = sorted(past['season'].unique())
+    if len(seasons) < 2:
         return (lambda gp: np.full(len(gp), BOX_SHARE_DEFAULT),
-                f"fixed {BOX_SHARE_DEFAULT:.2f} box share ({len(pit)}/{DYN_MIN_GAMES} day-of-KenPom games for dynamic weights)")
-    past = df[df['season'] < current_season]
-    w = past['season'].map(season_weights).fillna(0.1)
-    box = XGBRegressor(**xgb_params).fit(past[BOX_FEATURES], past['margin'], sample_weight=w).predict(pit[BOX_FEATURES])
-    kp = XGBRegressor(**xgb_params).fit(past[v2_features], past['margin'], sample_weight=w).predict(pit[v2_features])
-    diff, gp = box - kp, pit['box_min_gp'].values
-    X = np.column_stack([diff, diff * gp])
-    a, b = np.linalg.lstsq(X, pit['margin'].values - kp, rcond=None)[0]
-    fn = lambda g: np.clip(a + b * np.asarray(g, dtype=float), 0.0, 1.0)
-    return fn, (f"dynamic box share on {len(pit)} games: {fn([0])[0]:.2f} at 0 games, "
-                f"{fn([5])[0]:.2f} at 5, {fn([15])[0]:.2f} at 15")
+                f"fixed {BOX_SHARE_DEFAULT:.2f} box share (need 2+ past seasons with day-of KenPom)")
+    parts = []
+    for s in seasons:
+        tr, te = past[past['season'] != s], past[past['season'] == s]
+        w = tr['season'].map(season_weights).fillna(0.1)
+        parts.append(pd.DataFrame({
+            'box': XGBRegressor(**xgb_params).fit(tr[BOX_FEATURES], tr['margin'], sample_weight=w).predict(te[BOX_FEATURES]),
+            'kp': XGBRegressor(**xgb_params).fit(tr[v2_features], tr['margin'], sample_weight=w).predict(te[v2_features]),
+            'margin': te['margin'].values, 'gp': te['box_min_gp'].values}))
+    oof = pd.concat(parts, ignore_index=True)
+    shares = []
+    for lo, hi in TRUST_BINS:
+        d = oof[(oof['gp'] >= lo) & (oof['gp'] <= hi)]
+        diff = d['box'] - d['kp']
+        shares.append(float(np.clip((diff * (d['margin'] - d['kp'])).sum() / (diff ** 2).sum(), 0.0, 1.0))
+                      if len(d) >= TRUST_MIN_GAMES else BOX_SHARE_DEFAULT)
+
+    def fn(gp):
+        g = np.asarray(gp, dtype=float)
+        out = np.full(len(g), shares[-1])
+        for (lo, hi), s in zip(TRUST_BINS, shares):
+            out[(g >= lo) & (g <= hi)] = s
+        return out
+    desc = "box share by games played (learned from " + '-'.join(map(str, [seasons[0], seasons[-1]])) + "): " + \
+           ', '.join(f"{lo}-{hi if hi < 999 else '+'}: {s:.2f}".replace('-+', '+') for (lo, hi), s in zip(TRUST_BINS, shares))
+    return fn, desc
