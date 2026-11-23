@@ -201,8 +201,14 @@ function gameCard(g, showDate = false) {
     <div class="teams">${colsHead}${row(g.away, false)}${row(g.home, true)}</div>${detail}${blend}</div>`;
 }
 
+/* Date pickers on Picks and 1H show only the 3 most recent days (today and the two before).
+   Season records still use every game in S.games. */
+const DAYS_SHOWN = 3;
+const recentDates = () => [...new Set(S.games.map(g => g.date))].filter(d => d <= S.meta.today).sort().reverse().slice(0, DAYS_SHOWN);
+const dayBefore = ymd => { const d = new Date(ymd + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() - 1); return d.toISOString().slice(0, 10); };
+
 function renderPicks() {
-  const dates = [...new Set(S.games.map(g => g.date))].sort().reverse();
+  const dates = recentDates();
   const ui = S.ui.picks = S.ui.picks || { date: dates.includes(S.meta.today) ? S.meta.today : dates[0], filter: 'all' };
   const day = S.games.filter(g => g.date === ui.date);
   const isPick = g => !!(betOf(g, OFFICIAL) || betOf(g, OFFICIAL, 'ou'));
@@ -386,7 +392,7 @@ function kalshiLine(g) {
 }
 
 function renderH1() {
-  const dates = [...new Set(S.games.map(g => g.date))].sort().reverse();
+  const dates = recentDates();
   const ui = S.ui.h1 = S.ui.h1 || { date: dates.includes(S.meta.today) ? S.meta.today : dates[0] };
   const day = S.games.filter(g => g.date === ui.date);
   const q = (ui.q || '').trim().toLowerCase();
@@ -427,6 +433,17 @@ function renderH1() {
     .map(({ g, p }) => `<div class="recent-row"><span class="res ${p.result}">${p.result}</span>
       <span class="rr-pick">1H ${p.over ? 'OVER' : 'UNDER'} ${fmt(p.line, 1)} · ${esc(shortName(g.away))} ${g.neutral ? 'vs' : '@'} ${esc(shortName(g.home))}</span>
       <span class="mut small num">${niceDate(g.date, { month: 'short', day: 'numeric' })} · ${g.h1_final.home + g.h1_final.away}</span></div>`).join('');
+  // Yesterday's 1H O/U picks (always the day before today, whatever date is selected)
+  const yDate = dayBefore(S.meta.today);
+  const yPicks = picked.filter(x => x.g.date === yDate), yDone = yPicks.filter(x => x.p.result);
+  const yw = yDone.filter(x => x.p.result === 'W').length, yl = yDone.filter(x => x.p.result === 'L').length,
+        yp = yDone.filter(x => x.p.result === 'P').length, yPend = yPicks.length - yDone.length;
+  const yUnits = yw * (100 / 110) - yl;
+  const yCard = `<div class="stat"><div class="k">Yesterday · ${niceDate(yDate)}</div>
+      <div class="v num">${yPicks.length ? `${yw}-${yl}${yp ? '-' + yp : ''}` : '—'}</div>
+      <div class="d">${!yPicks.length ? 'no 1H O/U picks' : yw + yl
+        ? `${fmt(yw / (yw + yl) * 100)}% · <span class="${yUnits >= 0 ? 'pos' : 'neg'}">${unitsStr(yUnits)}</span>${yPend ? ' · ' + yPend + ' pending' : ''}`
+        : yPend + ' pending'}</div></div>`;
   const tracker = `<div class="strip">
       <details class="stat tracker accent h1-rec"><summary><div class="k">1H O/U picks record <span class="caret">▾</span></div>
         <div class="v num">${pw}-${pl}${pp ? '-' + pp : ''}</div>
@@ -434,6 +451,7 @@ function renderH1() {
           : `${fmt(pPct)}% · <span class="${pUnits >= 0 ? 'pos' : 'neg'}">${unitsStr(pUnits)}</span> · ${pw + pl + pp} picks${pend ? ' · ' + pend + ' pending' : ''}`}
           · ${fmt(H1_OU_THRESHOLD * 100, 0)}%+ (gap ${fmt(normInvGap(), 1)}+)</div></summary>
         <div class="recent"><div class="mut small">Last 5 graded</div>${pRecent || '<div class="mut small">No graded picks yet.</div>'}</div></details>
+      ${yCard}
       <div class="stat"><div class="k">Graded</div><div class="v num">${graded.length}</div><div class="d">first halves with a v3 prediction</div></div>
       <details class="stat tracker"><summary><div class="k">1H margin error <span class="caret">▾</span></div><div class="v num">${mErr === null ? '—' : fmt(mErr, 2)}</div>
         <div class="d">${mErr === null ? 'no graded games yet' : vs(mErr, mHalf)}</div></summary>
