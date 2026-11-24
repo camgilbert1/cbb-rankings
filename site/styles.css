@@ -281,9 +281,9 @@ details[open] > summary .caret { transform: rotate(180deg); }
 .gc-win { padding: 6px 14px 10px; }
 .gc-win-k { display: flex; justify-content: space-between; gap: 8px; font-family: var(--mono); font-size: 12px; color: var(--muted); }
 .gc-win-k b { color: var(--text); }
-.gc-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; margin-top: 6px; background: var(--blue); }
-.gc-bar .a { background: var(--amber); }
-.gc-bar .h { flex: 1; background: var(--blue); }
+.gc-bar { display: flex; gap: 2px; height: 8px; border-radius: 4px; overflow: hidden; margin-top: 6px; }
+.gc-bar .fav { background: var(--violet); }     /* team v3 favors */
+.gc-bar .dog { background: var(--line-2); }
 .gc-market { margin: 0 14px 10px; border-bottom: 1px dashed var(--line-2); padding-bottom: 6px; }
 .gc-mrow { display: grid; grid-template-columns: 1fr 64px 64px 56px; gap: 6px; align-items: center; padding: 7px 0; font-size: 14px; }
 .gc-mrow + .gc-mrow { border-top: 1px solid var(--line); }

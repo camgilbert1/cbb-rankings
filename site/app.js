@@ -170,7 +170,7 @@ function gameCard(g, showDate = false) {
     const pct = p => Math.round(p * 100) + '%';
     const win = `<div class="gc-win"><div class="gc-win-k"><span><b class="num">${pct(pAway)}</b> ${esc(shortName(g.away))}</span>
         <span class="mut">Win chance</span><span>${esc(shortName(g.home))} <b class="num">${pct(pHome)}</b></span></div>
-      <div class="gc-bar"><span class="a" style="width:${pAway * 100}%"></span><span class="h"></span></div></div>`;
+      <div class="gc-bar"><span class="${pAway > pHome ? 'fav' : 'dog'}" style="width:${pAway * 100}%"></span><span class="${pHome >= pAway ? 'fav' : 'dog'}" style="flex:1"></span></div></div>`;
     // Market vs model: home team's spread (negative = favored) and the total; gap = model - market
     const predTotal = hasPred ? v3.home + v3.away : null;
     const mSpread = -v3.margin;
