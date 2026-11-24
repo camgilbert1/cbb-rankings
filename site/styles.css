@@ -269,3 +269,34 @@ details[open] > summary .caret { transform: rotate(180deg); }
 .h1m-src { padding: 4px 10px 6px; border-top: 1px solid var(--line); text-align: right; font-size: 11px; }
 .card.h1-edge { border-color: var(--blue); box-shadow: 0 0 0 1px var(--blue-bg) inset; }
 @media (max-width: 420px) { .h1m-row { grid-template-columns: 52px 1fr 1fr 1.3fr; gap: 6px; font-size: 12px; } .h1m-row.ou { font-size: 14px; } }
+
+/* ---- Picks game card (Nov 24 2026): projected score, win chance bar, market vs model table ---- */
+.gc-teams { padding: 8px 14px 4px; }
+.gc-head { text-align: right; color: var(--dim); font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; font-family: var(--mono); }
+.gc-team { display: grid; grid-template-columns: 34px 1fr auto; gap: 10px; align-items: center; padding: 6px 0; }
+.gc-team .tname { font-size: 16px; }
+.gc-rk { color: var(--dim); font-weight: 600; font-size: 12px; margin-left: 6px; }
+.gc-score { font-family: var(--mono); font-size: 24px; font-weight: 800; color: var(--text); letter-spacing: -.02em; }
+.gc-team.bet-side .gc-score { color: var(--violet); }
+.gc-win { padding: 6px 14px 10px; }
+.gc-win-k { display: flex; justify-content: space-between; gap: 8px; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.gc-win-k b { color: var(--text); }
+.gc-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; margin-top: 6px; background: var(--blue); }
+.gc-bar .a { background: var(--amber); }
+.gc-bar .h { flex: 1; background: var(--blue); }
+.gc-market { margin: 0 14px 10px; border-bottom: 1px dashed var(--line-2); padding-bottom: 6px; }
+.gc-mrow { display: grid; grid-template-columns: 1fr 64px 64px 56px; gap: 6px; align-items: center; padding: 7px 0; font-size: 14px; }
+.gc-mrow + .gc-mrow { border-top: 1px solid var(--line); }
+.gc-mrow > span:not(:first-child) { text-align: right; font-family: var(--mono); }
+.gc-mrow > span:first-child { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gc-mhead { color: var(--dim); font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; padding: 2px 0 4px; }
+.gc-mhead > span:not(:first-child) { font-family: var(--mono); }
+.gc-model { color: var(--violet); font-weight: 700; }
+.gc-none { padding: 10px 14px 12px; font-size: 13px; }
+.gc-more summary { list-style: none; cursor: pointer; padding: 8px 14px 10px; font-size: 13px; font-weight: 600; color: var(--muted); display: flex; gap: 6px; align-items: center; }
+.gc-more summary::-webkit-details-marker { display: none; }
+.gc-more summary .caret { margin-left: 0; }
+.gc-more .blendbar { border-top: 0; padding-top: 0; }
+.gc-more .blendbar > div:last-child { margin-top: 6px; }
+.card > .official-banner:last-child { margin-bottom: 12px; }
+@media (max-width: 420px) { .gc-mrow { grid-template-columns: 1fr 56px 56px 50px; font-size: 13px; } .gc-score { font-size: 22px; } }

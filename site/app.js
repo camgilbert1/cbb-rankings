@@ -148,35 +148,42 @@ window.addEventListener('hashchange', route);
 // (no final scores, live status or W/L). Results and Models grade the picks from saved results.
 function gameCard(g, showDate = false) {
   const v3 = g[OFFICIAL], bet = betOf(g, OFFICIAL), ouBet = betOf(g, OFFICIAL, 'ou');
-  const top = `<span>${showDate ? esc(niceDate(g.date)) + ' · ' : ''}${esc(etTime(g.time))}
-               ${g.neutral ? '<span class="tag">NEUTRAL</span>' : ''}</span>
-               <span>${g.spread === null || g.spread === undefined ? 'No line' : 'Line ' + esc(shortName(g.spread <= 0 ? g.home : g.away)) + ' ' + fmtLine(-Math.abs(g.spread))}</span>`;
+  const has = x => x !== null && x !== undefined;
+  const hasPred = v3 && has(v3.home);
+  const top = `<span>${showDate ? esc(niceDate(g.date)) + ' · ' : ''}${esc(etTime(g.time))}${g.neutral ? ' · Neutral' : ''}</span>`;
+  // Team rows: logo, name + KenPom rank, record/conference, projected score
   const row = (side, isHome) => {
     const t = team(side.id);
-    const rk = t ? `<span class="rk">${t.kenpom.rank}</span>` : '';
-    const line = g.spread === null || g.spread === undefined ? '' : fmtLine(isHome ? g.spread : -g.spread);
     const isBetSide = bet && (bet.side === 'home') === isHome;
-    const pred = v3 && v3.home !== null && v3.home !== undefined ? fmt(isHome ? v3.home : v3.away, 0) : '—';
     const href = t ? `href="#/team/${side.id}"` : '';
-    return `<div class="team-row${isBetSide ? ' bet-side' : ''}">${logo(side)}
-      <div style="min-width:0"><a ${href} class="tname">${rk}${esc(shortName(side))}</a>
+    return `<div class="gc-team${isBetSide ? ' bet-side' : ''}">${logo(side)}
+      <div style="min-width:0"><a ${href} class="tname">${esc(shortName(side))}${t ? `<span class="gc-rk">#${t.kenpom.rank}</span>` : ''}</a>
       <div class="tmeta">${esc(side.record || (t && t.record) || '')}${t ? ' · ' + esc(t.conf) : ''}</div></div>
-      <div class="line num">${line}</div><div class="pred num">${pred}</div></div>`;
+      <div class="gc-score num">${hasPred ? fmt(isHome ? v3.home : v3.away) : '—'}</div></div>`;
   };
-  const colsHead = `<div class="cols-head"><span></span><span></span><span>Line</span><span>Pred</span></div>`;
-  let detail;
+  let body;
   if (!v3) {
-    detail = '<div class="v3line mut">No v3 prediction for this game</div>';
+    body = '<div class="gc-none mut">No v3 prediction for this game</div>';
   } else {
-    const fav = v3.margin >= 0 ? shortName(g.home) : shortName(g.away);
-    const edge = g.spread === null || g.spread === undefined ? null : Math.abs(v3.margin + g.spread);
-    const predTotal = v3.home !== null && v3.home !== undefined ? v3.home + v3.away : null;
-    const ou = g.total_line === null || g.total_line === undefined ? null : g.total_line;
-    detail = `<div class="v3line"><span><b style="color:var(--violet)">v3</b> ${esc(fav)} by ${fmt(Math.abs(v3.margin))}</span>
-      <span class="mut num">${edge === null ? 'no line' : 'edge ' + fmt(edge)}${bet ? '' : ' · no bet'}</span></div>
-      <div class="v3line totals"><span>Total <b class="num" style="color:var(--violet)">${predTotal === null ? '—' : fmt(predTotal, 0)}</b> predicted${v3.box_total !== null && v3.box_total !== undefined && v3.kp_total !== null && v3.kp_total !== undefined
-        ? ` <span class="mut small">(KenPom ${fmt(v3.kp_total, 0)} · box ${fmt(v3.box_total, 0)})</span>` : ''}</span>
-      <span class="mut num">${ou === null ? 'O/U line not posted' : 'O/U ' + fmt(ou, 1).replace(/\.0$/, '')}${ou === null || ouBet ? '' : ' · no bet'}</span></div>`;
+    // Win chance from v3's margin (same logistic as TrainModel: 1 / (1 + e^(-margin/10)))
+    const pHome = 1 / (1 + Math.exp(-v3.margin / 10)), pAway = 1 - pHome;
+    const pct = p => Math.round(p * 100) + '%';
+    const win = `<div class="gc-win"><div class="gc-win-k"><span><b class="num">${pct(pAway)}</b> ${esc(shortName(g.away))}</span>
+        <span class="mut">Win chance</span><span>${esc(shortName(g.home))} <b class="num">${pct(pHome)}</b></span></div>
+      <div class="gc-bar"><span class="a" style="width:${pAway * 100}%"></span><span class="h"></span></div></div>`;
+    // Market vs model: home team's spread (negative = favored) and the total; gap = model - market
+    const predTotal = hasPred ? v3.home + v3.away : null;
+    const mSpread = -v3.margin;
+    const mrow = (label, market, model, isSpread) => {
+      const gap = has(market) && has(model) ? model - market : null;
+      const show = x => !has(x) ? '—' : isSpread ? (Math.abs(x) < 0.05 ? 'PK' : sgn(x)) : fmt(x);
+      return `<div class="gc-mrow"><span>${label}</span><span class="num">${show(market)}</span>
+        <span class="num gc-model">${show(model)}</span><span class="num">${has(gap) ? sgn(gap) : '—'}</span></div>`;
+    };
+    body = `${win}<div class="gc-market">
+      <div class="gc-mrow gc-mhead"><span></span><span>Market</span><span>Model</span><span>Gap</span></div>
+      ${mrow(esc(shortName(g.home)) + ' spread', g.spread, mSpread, true)}
+      ${mrow('Total', g.total_line, predTotal, false)}</div>`;
   }
   let banner = '';
   if (bet) {
@@ -191,14 +198,19 @@ function gameCard(g, showDate = false) {
       <div class="ob-pick">${esc(ouBet.label)}</div>
       <div class="ob-meta num">${fmt(ouBet.prob * 100, 0)}% · edge ${fmt(ouBet.edge)} pts · ${fmt(ouBet.units, 0)}U</div></div>`;
   }
-  let blend = '';
-  if (v3 && v3.box !== null && v3.kp !== null && v3.box !== undefined) {
+  // Collapsible model breakdown: how v3's two halves see the margin and the total
+  let breakdown = '';
+  if (v3 && has(v3.box) && has(v3.kp)) {
     const share = Math.round((v3.box_share || 0) * 100);
-    blend = `<div class="blendbar">Box-score model <b class="num">${sgn(v3.box)}</b> · KenPom model <b class="num">${sgn(v3.kp)}</b> · ${share}% box
-      <div class="bar"><span style="width:${share}%"></span></div></div>`;
+    const totals = has(v3.box_total) && has(v3.kp_total)
+      ? `<div>Total: KenPom <b class="num">${fmt(v3.kp_total)}</b> · box <b class="num">${fmt(v3.box_total)}</b></div>` : '';
+    breakdown = `<details class="gc-more"><summary><span class="caret">▾</span> Model breakdown</summary>
+      <div class="blendbar">Home margin: box-score model <b class="num">${sgn(v3.box)}</b> · KenPom model <b class="num">${sgn(v3.kp)}</b> · ${share}% box
+        <div class="bar"><span style="width:${share}%"></span></div>${totals}</div></details>`;
   }
-  return `<div class="card${bet || ouBet ? ' official' : ''}" id="${cardId(g)}"><div class="card-top">${top}</div>${banner}
-    <div class="teams">${colsHead}${row(g.away, false)}${row(g.home, true)}</div>${detail}${blend}</div>`;
+  return `<div class="card${bet || ouBet ? ' official' : ''}" id="${cardId(g)}"><div class="card-top">${top}</div>
+    <div class="gc-teams"><div class="gc-head">Projected score</div>${row(g.away, false)}${row(g.home, true)}</div>
+    ${body}${banner}${breakdown}</div>`;
 }
 
 /* Date pickers on Picks and 1H show only the 3 most recent days (today and the two before).
