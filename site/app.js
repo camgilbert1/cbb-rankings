@@ -198,9 +198,17 @@ function liveCard(kind) {
         : `${split}${tot.w + tot.l ? `<span class="${u >= 0 ? 'pos' : 'neg'}">${unitsStr(u)}</span> · ` : ''}${pend ? pend + ' pending' : 'all graded'}`}</div>
       <div class="d live-at">${n ? when : ''}</div></div>`;
 }
+// W / L / PUSH chip on a game card's official pick box (live for today; blank until graded)
+const pickChip = (g, mk) => { const r = betResult(liveGame(g), OFFICIAL, mk);
+  return `<span class="pick-res" data-live="${cardId(g)}|${mk}">${r ? resChip(r) : ''}</span>`; };
 async function refreshLive() {
   await fetchLive();
   for (const kind of ['picks', 'h1']) { const el = document.getElementById('live-' + kind); if (el) el.outerHTML = liveCard(kind); }
+  const today = new Map(S.games.filter(g => g.date === S.meta.today).map(g => [cardId(g), g]));
+  document.querySelectorAll('[data-live]').forEach(el => {
+    const [id, mk] = el.dataset.live.split('|'), g = today.get(id);
+    if (g) el.outerHTML = pickChip(g, mk);
+  });
   const left = Object.values({ ...todayTally('picks'), ...todayTally('h1') }).some(s => s.pend);
   if (!left && !LIVE.err && LIVE.timer) { clearInterval(LIVE.timer); LIVE.timer = null; }   // everything graded
 }
@@ -226,7 +234,7 @@ window.addEventListener('hashchange', route);
 
 /* ================= PICKS (v3 only) ================= */
 // Picks is a pre-game view: the model runs once and posts its picks, so cards show predictions only
-// (no final scores, live status or W/L). Results and Models grade the picks from saved results.
+// (no final scores or live status). The official pick boxes show W/L once graded (live for today).
 /* Shared card pieces (Picks and 1H cards use the same layout) */
 const has = x => x !== null && x !== undefined;
 const cardTop = (g, showDate) => `<span>${showDate ? esc(niceDate(g.date)) + ' · ' : ''}${esc(etTime(g.time))}${g.neutral ? ' · Neutral' : ''}</span>`;
@@ -275,13 +283,13 @@ function gameCard(g, showDate = false) {
   let banner = '';
   if (bet) {
     banner += `<div class="official-banner">
-      <div class="ob-top"><span class="ob-label">OFFICIAL PICK · ATS</span>${retroTag(bet)}</div>
+      <div class="ob-top"><span class="ob-label">OFFICIAL PICK · ATS</span>${retroTag(bet)}${pickChip(g, 'ats')}</div>
       <div class="ob-pick">${esc(bet.label)}</div>
       <div class="ob-meta num">${fmt(bet.prob * 100, 0)}% to cover · edge ${fmt(bet.edge)} · ${fmt(bet.units, 0)}U</div></div>`;
   }
   if (ouBet) {
     banner += `<div class="official-banner">
-      <div class="ob-top"><span class="ob-label">OFFICIAL PICK · O/U</span>${retroTag(ouBet)}</div>
+      <div class="ob-top"><span class="ob-label">OFFICIAL PICK · O/U</span>${retroTag(ouBet)}${pickChip(g, 'ou')}</div>
       <div class="ob-pick">${esc(ouBet.label)}</div>
       <div class="ob-meta num">${fmt(ouBet.prob * 100, 0)}% · edge ${fmt(ouBet.edge)} pts · ${fmt(ouBet.units, 0)}U</div></div>`;
   }
