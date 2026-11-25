@@ -199,7 +199,7 @@ function liveCard(kind) {
       <div class="d live-at">${n ? when : ''}</div></div>`;
 }
 // W / L / PUSH chip on a game card's official pick box (live for today; blank until graded)
-const pickChip = (g, mk) => { const r = betResult(liveGame(g), OFFICIAL, mk);
+const pickChip = (g, mk) => { const r = mk === 'h1' ? (h1Pick(liveGame(g)) || {}).result : betResult(liveGame(g), OFFICIAL, mk);
   return `<span class="pick-res" data-live="${cardId(g)}|${mk}">${r ? resChip(r) : ''}</span>`; };
 async function refreshLive() {
   await fetchLive();
@@ -419,7 +419,7 @@ function h1Card(g, showDate = false) {
   }
   const p = h1Pick(g);
   const banner = p ? `<div class="official-banner h1-banner">
-      <div class="ob-top"><span class="ob-label">OFFICIAL 1H O/U</span>${p.result ? resChip(p.result) : ''}</div>
+      <div class="ob-top"><span class="ob-label">OFFICIAL 1H O/U</span>${pickChip(g, 'h1')}</div>
       <div class="ob-pick">1H ${p.over ? 'OVER' : 'UNDER'} ${fmt(p.line, 1)}</div>
       <div class="ob-meta num">${fmt(p.prob * 100, 0)}% · gap ${fmt(p.edge, 1)} pts · 1U · ${esc(p.src)}</div></div>` : '';
   const full = v3 && has(v3.home) ? `<details class="gc-more"><summary><span class="caret">▾</span> Full game</summary>
@@ -584,7 +584,7 @@ function h1PlaysBar(day, ui) {
       <span class="mut num">${plays.length} · 1H O/U</span><span class="caret">▾</span></summary>
     <div class="play-list">${plays.map(({ g, p }) => `<button class="play-row" data-card="${cardId(g)}">
       <span class="tag mk-ou">1H O/U</span>
-      <span class="pr-main"><span class="pr-pick">${p.over ? 'OVER' : 'UNDER'} ${fmt(p.line, 1)}${p.result ? ' ' + resChip(p.result) : ''}</span>
+      <span class="pr-main"><span class="pr-pick">${p.over ? 'OVER' : 'UNDER'} ${fmt(p.line, 1)} ${pickChip(g, 'h1')}</span>
         <span class="pr-sub">${esc(etTime(g.time).replace(' ET', ''))} · ${esc(shortName(g.away))} ${g.neutral ? 'vs' : '@'} ${esc(shortName(g.home))}</span></span>
       <span class="pr-prob num">${fmt(p.prob * 100, 0)}%</span></button>`).join('')}</div></details>`;
 }
