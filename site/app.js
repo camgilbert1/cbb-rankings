@@ -131,6 +131,87 @@ async function load() {
     'Updated ' + t.toLocaleString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) + ' ET';
 }
 
+/* ---------------- live record (today only) ----------------
+   Grades today's official picks from ESPN's live scoreboard as games finish. Picks and lines stay exactly as
+   the morning run saved them; only scores are read. A full-game pick counts once ESPN marks the game final,
+   a 1H pick once the half is over. Games are matched by ESPN team ids (as stored, then flipped, like
+   BuildSite). Nothing is saved: the next morning run still writes the official results. */
+const LIVE_EVERY_MS = 3 * 60 * 1000;
+const LIVE = { finals: {}, halves: {}, at: null, err: false, timer: null };
+async function fetchLive() {
+  try {
+    const r = await fetch('https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard'
+      + `?dates=${S.meta.today.replace(/-/g, '')}&groups=50&limit=400`, { cache: 'no-store' });
+    if (!r.ok) throw new Error(r.status);
+    const finals = {}, halves = {};
+    for (const ev of (await r.json()).events || []) {
+      const c = (ev.competitions || [])[0], st = (ev.status || {}).type || {};
+      if (!c) continue;
+      const side = {};
+      for (const x of c.competitors || []) side[x.homeAway] = x;
+      if (!side.home || !side.away) continue;
+      const key = `${side.home.team.id}-${side.away.team.id}`;
+      const done = st.state === 'post' && st.completed === true;
+      if (done) finals[key] = { home: Number(side.home.score), away: Number(side.away.score) };
+      const h1 = s => ((s.linescores || []).find(p => p.period === 1) || {}).value;
+      const halfOver = done || st.name === 'STATUS_HALFTIME' || ((ev.status || {}).period || 0) >= 2;
+      if (halfOver && has(h1(side.home)) && has(h1(side.away))) halves[key] = { home: Number(h1(side.home)), away: Number(h1(side.away)) };
+    }
+    Object.assign(LIVE, { finals, halves, at: new Date(), err: false });
+  } catch (e) { LIVE.err = true; }
+}
+// Today's game with live scores filled in (stored scores always win)
+function liveGame(g) {
+  if (g.date !== S.meta.today) return g;
+  const same = `${g.home.id}-${g.away.id}`, flip = `${g.away.id}-${g.home.id}`;
+  const pick = m => m[same] ? m[same] : m[flip] ? { home: m[flip].away, away: m[flip].home } : null;
+  return { ...g, final: g.final || pick(LIVE.finals), h1_final: g.h1_final || pick(LIVE.halves) };
+}
+// W-L-P / pending / units for today's official picks: kind 'picks' = ATS + O/U, 'h1' = 1H O/U
+function todayTally(kind) {
+  const mks = kind === 'h1' ? ['h1'] : ['ats', 'ou'], out = {};
+  for (const m of mks) out[m] = { w: 0, l: 0, p: 0, pend: 0, units: 0 };
+  for (const g of S.games.filter(x => x.date === S.meta.today).map(liveGame)) {
+    for (const m of mks) {
+      let r, u = 1;
+      if (m === 'h1') { const p = h1Pick(g); if (!p) continue; r = p.result; }
+      else { const b = betOf(g, OFFICIAL, m); if (!b) continue; r = betResult(g, OFFICIAL, m); u = b.units || 1; }
+      const s = out[m];
+      if (!r) { s.pend++; continue; }
+      r === 'W' ? s.w++ : r === 'L' ? s.l++ : s.p++;
+      s.units += r === 'W' ? u * WIN_PAYOUT : r === 'L' ? -u : 0;
+    }
+  }
+  return out;
+}
+function liveCard(kind) {
+  const T = todayTally(kind), all = Object.values(T), sum = f => all.reduce((a, s) => a + s[f], 0);
+  const tot = { w: sum('w'), l: sum('l'), p: sum('p') }, pend = sum('pend'), u = sum('units');
+  const n = tot.w + tot.l + tot.p + pend;
+  const split = kind === 'h1' ? '' : `ATS ${recStr(T.ats)} · O/U ${recStr(T.ou)} · `;
+  const when = LIVE.err ? 'live scores unavailable' : LIVE.at
+    ? 'live · ' + LIVE.at.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' }) + ' ET'
+    : 'loading live scores…';
+  return `<div class="stat live" id="live-${kind}"><div class="k">Today so far · ${niceDate(S.meta.today)}</div>
+      <div class="v num">${n ? recStr(tot) : '—'}</div>
+      <div class="d">${!n ? (kind === 'h1' ? 'no 1H O/U picks today' : 'no official picks today')
+        : `${split}${tot.w + tot.l ? `<span class="${u >= 0 ? 'pos' : 'neg'}">${unitsStr(u)}</span> · ` : ''}${pend ? pend + ' pending' : 'all graded'}`}</div>
+      <div class="d live-at">${n ? when : ''}</div></div>`;
+}
+async function refreshLive() {
+  await fetchLive();
+  for (const kind of ['picks', 'h1']) { const el = document.getElementById('live-' + kind); if (el) el.outerHTML = liveCard(kind); }
+  const left = Object.values({ ...todayTally('picks'), ...todayTally('h1') }).some(s => s.pend);
+  if (!left && !LIVE.err && LIVE.timer) { clearInterval(LIVE.timer); LIVE.timer = null; }   // everything graded
+}
+function startLive() {
+  const any = Object.values({ ...todayTally('picks'), ...todayTally('h1') }).some(s => s.pend);
+  if (!any) return;                                   // nothing left to grade today
+  refreshLive();
+  LIVE.timer = setInterval(() => { if (!document.hidden) refreshLive(); }, LIVE_EVERY_MS);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && LIVE.timer) refreshLive(); });
+}
+
 /* ---------------- router ---------------- */
 const routes = { picks: renderPicks, h1: renderH1, results: renderResults, models: renderModels, scorecard: renderModels,
                  ratings: renderRatings, team: renderTeam };
@@ -281,6 +362,7 @@ function renderPicks() {
       <div class="stat accent"><div class="k">Official picks</div><div class="v num">${nAts + nOu}</div><div class="d">${nAts} ATS · ${nOu} O/U</div></div>
       ${tracker('ATS', season, 'ats')}
       ${tracker('O/U', seasonOu, 'ou')}
+      ${liveCard('picks')}
     </div>
     <div class="controls">
       <button class="chip ${ui.filter === 'all' ? 'on' : ''}" data-f="all">All games <span class="mut">${day.length}</span></button>
@@ -440,6 +522,7 @@ function renderH1() {
           : `${fmt(pPct)}% · <span class="${pUnits >= 0 ? 'pos' : 'neg'}">${unitsStr(pUnits)}</span> · ${pw + pl + pp} picks${pend ? ' · ' + pend + ' pending' : ''}`}
           · ${fmt(H1_OU_THRESHOLD * 100, 0)}%+ (gap ${fmt(normInvGap(), 1)}+)</div></summary>
         <div class="recent"><div class="mut small">Last 5 graded</div>${pRecent || '<div class="mut small">No graded picks yet.</div>'}</div></details>
+      ${liveCard('h1')}
       ${yCard}
       <div class="stat"><div class="k">Graded</div><div class="v num">${graded.length}</div><div class="d">first halves with a v3 prediction</div></div>
       <details class="stat tracker"><summary><div class="k">1H margin error <span class="caret">▾</span></div><div class="v num">${mErr === null ? '—' : fmt(mErr, 2)}</div>
@@ -468,6 +551,9 @@ function renderH1() {
   document.getElementById('date').onchange = e => { ui.date = e.target.value; renderH1(); };
   document.getElementById('h1sort').onchange = e => { ui.sort = e.target.value; renderH1(); };
   document.getElementById('h1big').onclick = () => { ui.big = !ui.big; renderH1(); };
+  const gq = document.getElementById('gq');
+  gq.oninput = e => { ui.q = e.target.value; const pos = e.target.selectionStart; renderH1();
+    const n = document.getElementById('gq'); n.focus(); n.setSelectionRange(pos, pos); };
   const playsEl = document.getElementById('h1plays');
   if (playsEl) playsEl.ontoggle = () => lsSet('cbb.h1PlaysOpen', playsEl.open ? '1' : '0');
   document.querySelectorAll('.play-row').forEach(b => b.onclick = () => {
@@ -493,9 +579,6 @@ function h1PlaysBar(day, ui) {
       <span class="pr-main"><span class="pr-pick">${p.over ? 'OVER' : 'UNDER'} ${fmt(p.line, 1)}${p.result ? ' ' + resChip(p.result) : ''}</span>
         <span class="pr-sub">${esc(etTime(g.time).replace(' ET', ''))} · ${esc(shortName(g.away))} ${g.neutral ? 'vs' : '@'} ${esc(shortName(g.home))}</span></span>
       <span class="pr-prob num">${fmt(p.prob * 100, 0)}%</span></button>`).join('')}</div></details>`;
-  const gq = document.getElementById('gq');
-  gq.oninput = e => { ui.q = e.target.value; const pos = e.target.selectionStart; renderH1();
-    const n = document.getElementById('gq'); n.focus(); n.setSelectionRange(pos, pos); };
 }
 
 /* ================= MODELS (analysis of every model's bets) ================= */
@@ -862,7 +945,7 @@ function renderResults() {
 }
 
 /* ---------------- boot ---------------- */
-load().then(route).catch(e => {
+load().then(() => { route(); startLive(); }).catch(e => {
   $app.innerHTML = `<div class="empty">Could not load the data files (${esc(e.message)}).<br>
     Run <code>python BuildSite.py</code>, then serve the folder: <code>python -m http.server -d site 8000</code>.</div>`;
 });

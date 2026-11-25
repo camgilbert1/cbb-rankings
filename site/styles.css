@@ -222,6 +222,8 @@ details[open] > summary .caret { transform: rotate(180deg); }
 .res.pend { background: var(--panel-2); color: var(--dim); }
 .stat.accent { border-color: var(--violet-line); background: linear-gradient(180deg, var(--violet-bg), var(--panel)); }
 .stat.accent .k { color: var(--violet); }
+.stat.live { border-color: var(--violet-line); }
+.stat .live-at { margin-top: 2px; font-size: 11px; }
 .notice { background: var(--amber-bg); border: 1px solid rgba(245, 165, 36, .4); color: var(--amber); border-radius: 10px; padding: 10px 14px; margin-bottom: 16px; font-weight: 600; font-size: 13px; }
 .mcard.official-model { border-color: var(--violet-line); }
 .small { font-size: 12px; }
